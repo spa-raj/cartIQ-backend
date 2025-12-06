@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.cartiq</groupId>
+        <artifactId>cartiq-backend</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>cartiq-app</artifactId>
+    <name>CartIQ Application</name>
+
+    <dependencies>
+        <!-- Include all modules -->
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-user</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-product</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-order</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-kafka</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-ai</artifactId>
+        </dependency>
+
+        <!-- Database -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Actuator for health checks -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- JPA for EntityScan -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
