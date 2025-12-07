@@ -54,6 +54,7 @@ public class SecurityConfig {
                         // Chat endpoints require authentication
                         .requestMatchers("/api/chat/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/products/batch").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         // Health check & actuator
                         .requestMatchers("/actuator/**").permitAll()

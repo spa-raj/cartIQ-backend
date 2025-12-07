@@ -12,9 +12,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.List;
 
-@RestControllerAdvice
+@RestControllerAdvice(basePackages = "com.cartiq.user")
 @Slf4j
-public class GlobalExceptionHandler {
+public class UserExceptionHandler {
 
     @ExceptionHandler(UserException.class)
     public ResponseEntity<ErrorResponse> handleUserException(UserException ex, HttpServletRequest request) {
