@@ -1,5 +1,7 @@
 package com.cartiq.order.entity;
 
+import com.cartiq.common.enums.OrderStatus;
+import com.cartiq.common.enums.PaymentStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;

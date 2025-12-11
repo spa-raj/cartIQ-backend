@@ -1,5 +1,7 @@
 package com.cartiq.order.service;
 
+import com.cartiq.common.enums.OrderStatus;
+import com.cartiq.common.enums.PaymentStatus;
 import com.cartiq.order.dto.CreateOrderRequest;
 import com.cartiq.order.dto.OrderDTO;
 import com.cartiq.order.dto.OrderSummaryDTO;

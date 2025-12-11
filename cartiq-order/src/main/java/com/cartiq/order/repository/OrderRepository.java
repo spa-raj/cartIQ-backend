@@ -1,7 +1,7 @@
 package com.cartiq.order.repository;
 
 import com.cartiq.order.entity.Order;
-import com.cartiq.order.entity.OrderStatus;
+import com.cartiq.common.enums.OrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
