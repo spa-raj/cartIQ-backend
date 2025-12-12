@@ -63,9 +63,32 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+!.env.example
 
 # Spring Boot
 *.pid
 
 # Claude AI
 CLAUDE.md
+
+# GCP config files and credentials
+cartiq-sa-key.json
+*-sa-key.json
+*-credentials.json
+service-account*.json
+gcp-*.json
+
+# Secrets
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+credentials/
+
+# Local configuration overrides
+application-local.properties
+application-local.yml
+bootstrap-local.properties
