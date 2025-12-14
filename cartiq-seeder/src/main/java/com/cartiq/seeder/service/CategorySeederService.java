@@ -5,6 +5,7 @@ import com.cartiq.product.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -26,6 +27,9 @@ public class CategorySeederService {
     // Cache categories by path for fast lookups
     private final Map<String, Category> categoryCache = new ConcurrentHashMap<>();
 
+    // Lock for thread-safe category creation
+    private final Object categoryLock = new Object();
+
     /**
      * Parses categories from Amazon LDJSON format.
      * Creates hierarchy from primary category and subcategory array.
@@ -34,7 +38,7 @@ public class CategorySeederService {
      * @param subCategories   e.g., ["Shoes", "Women's Shoes", "Flip-Flops & Slippers"]
      * @return the leaf category, or null if no categories provided
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Category getOrCreateCategoryFromLdjson(String primaryCategory, List<String> subCategories) {
         if ((primaryCategory == null || primaryCategory.isBlank()) &&
                 (subCategories == null || subCategories.isEmpty())) {
@@ -112,25 +116,35 @@ public class CategorySeederService {
 
     /**
      * Gets or creates a category with the given parameters.
+     * Thread-safe: uses synchronization to prevent race conditions.
      */
     private Category getOrCreateCategory(String name, String path, int level, Category parent) {
-        // Check cache first
+        // Check cache first (fast path, no lock needed)
         Category cached = categoryCache.get(path);
         if (cached != null) {
             return cached;
         }
 
-        // Check database
-        Category existing = categoryRepository.findByPath(path).orElse(null);
-        if (existing != null) {
-            categoryCache.put(path, existing);
-            return existing;
-        }
+        // Synchronize category creation to prevent race conditions
+        synchronized (categoryLock) {
+            // Double-check after acquiring lock
+            cached = categoryCache.get(path);
+            if (cached != null) {
+                return cached;
+            }
 
-        // Create new category
-        Category created = createCategory(name, path, level, parent);
-        categoryCache.put(path, created);
-        return created;
+            // Check database
+            Category existing = categoryRepository.findByPath(path).orElse(null);
+            if (existing != null) {
+                categoryCache.put(path, existing);
+                return existing;
+            }
+
+            // Create new category
+            Category created = createCategory(name, path, level, parent);
+            categoryCache.put(path, created);
+            return created;
+        }
     }
 
     private Category createCategory(String name, String path, int level, Category parent) {
@@ -149,11 +163,16 @@ public class CategorySeederService {
 
     /**
      * Generates a unique name for categories that might have the same name
-     * but different paths. Uses the last two parts of the path for uniqueness.
+     * but different paths. Always uses path context to ensure uniqueness.
+     * This method is called within a synchronized block, so it's thread-safe.
      */
     private String generateUniqueName(String name, String path) {
-        // Check if a category with this name already exists
-        if (!categoryRepository.existsByName(name)) {
+        // First check cache for any category with this name
+        boolean nameExistsInCache = categoryCache.values().stream()
+                .anyMatch(c -> c.getName().equals(name));
+
+        // Check if a category with this name already exists (cache or DB)
+        if (!nameExistsInCache && !categoryRepository.existsByName(name)) {
             return name;
         }
 
