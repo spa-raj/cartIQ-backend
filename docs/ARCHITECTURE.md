@@ -101,9 +101,9 @@ Product CRUD → Spring Event → Embed → Upsert to Vector Index (async)
 ## Data Flow Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────────────────────────────┐
 │                              COMPLETE DATA FLOW                                  │
-├─────────────────────────────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
 │  ┌──────────┐                                                                    │
 │  │ Frontend │ (React + Firebase)                                                 │
@@ -116,10 +116,10 @@ Product CRUD → Spring Event → Embed → Upsert to Vector Index (async)
 │  │ API Layer   │         │ Chat Controller │              │                      │
 │  │ (Kafka mod) │         │     (A.2)       │              │                      │
 │  └──────┬──────┘         └────────┬────────┘              │                      │
-│         │                         │                        │                      │
-│         │ (4)                     │ (A.3)                  │                      │
-│         ▼                         ▼                        │                      │
-│  ┌─────────────┐         ┌─────────────────────────────────────────────────┐    │
+│         │                         │                       │                      │
+│         │ (4)                     │ (A.3)                 │                      │
+│         ▼                         ▼                       │                      │
+│  ┌─────────────┐         ┌──────────────────────────────────────────────────┐    │
 │  │ Kafka Input │         │              AI/ML RAG Layer                     │    │
 │  └──────┬──────┘         │                                                  │    │
 │         │                │  ┌─────────────┐    ┌─────────────────────────┐  │    │
@@ -151,7 +151,7 @@ Product CRUD → Spring Event → Embed → Upsert to Vector Index (async)
 │  │  (async)    │         (Incremental Indexing)      Response to User            │
 │  └─────────────┘                                                                 │
 │                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -260,19 +260,19 @@ return ragPipeline.retrieve(query, userContext);
 
 ## Technology Stack
 
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| Frontend | React + TypeScript | User interface |
-| Backend | Spring Boot 3.2 (Modular Monolith) | API + Business logic |
-| Database | Cloud SQL (PostgreSQL) | Persistent storage |
-| Cache | Cloud Memorystore (Redis) | User context + Embedding cache |
-| Streaming | Apache Kafka (Confluent Cloud) | Event transport |
-| Processing | Apache Flink (Confluent Cloud) | Stream aggregation |
-| Vector DB | Vertex AI Vector Search | Product embeddings index |
-| Embeddings | Vertex AI Embeddings | text-embedding-004 (768-dim) |
-| Re-ranking | Vertex AI Ranking API | Cross-encoder re-ranking |
-| LLM | Gemini 2.5 Pro | Personalized responses |
-| Hosting | Google Cloud Run + Firebase | Deployment |
+| Layer | Technology                         | Purpose |
+|-------|------------------------------------|---------|
+| Frontend | React + TypeScript                 | User interface |
+| Backend | Spring Boot 4.0 (Modular Monolith) | API + Business logic |
+| Database | Cloud SQL (PostgreSQL)             | Persistent storage |
+| Cache | Cloud Memorystore (Redis)          | User context + Embedding cache |
+| Streaming | Apache Kafka (Confluent Cloud)     | Event transport |
+| Processing | Apache Flink (Confluent Cloud)     | Stream aggregation |
+| Vector DB | Vertex AI Vector Search            | Product embeddings index |
+| Embeddings | Vertex AI Embeddings               | text-embedding-004 (768-dim) |
+| Re-ranking | Vertex AI Ranking API              | Cross-encoder re-ranking |
+| LLM | Gemini 2.5 Pro                     | Personalized responses |
+| Hosting | Google Cloud Run + Firebase        | Deployment |
 
 ---
 
@@ -306,7 +306,6 @@ return ragPipeline.retrieve(query, userContext);
 
 ## Related Documentation
 
-- [RAG Architecture Details](./updateArchitecture.md)
 - [GCP Setup Guide](./GCP_SETUP.md)
 - [Deployment Guide](./DEPLOYMENT.md)
 - [Demo Script](./demo.md)
@@ -316,4 +315,4 @@ return ragPipeline.retrieve(query, userContext);
 
 ---
 
-*Last updated: December 13, 2025*
+*Last updated: December 14, 2025*
