@@ -27,4 +27,20 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
 
     @Query("SELECT c FROM Category c WHERE c.parentCategory IS NULL AND c.active = true ORDER BY c.name ASC")
     List<Category> findRootCategories();
+
+    /**
+     * Find all categories under a path prefix (includes the category itself and all descendants).
+     * Example: findByPathStartingWith("Electronics") returns Electronics, Electronics >> Mobiles, etc.
+     */
+    List<Category> findByPathStartingWithAndActiveTrue(String pathPrefix);
+
+    /**
+     * Find category by exact path.
+     */
+    Optional<Category> findByPath(String path);
+
+    /**
+     * Find all categories at a specific level.
+     */
+    List<Category> findByLevelAndActiveTrue(Integer level);
 }

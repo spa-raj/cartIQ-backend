@@ -11,7 +11,10 @@ import java.util.List;
 import java.util.UUID;
 
 @Entity
-@Table(name = "categories")
+@Table(name = "categories", indexes = {
+    @Index(name = "idx_category_path", columnList = "path"),
+    @Index(name = "idx_category_level", columnList = "level")
+})
 @Getter
 @Setter
 @Builder
@@ -32,6 +35,20 @@ public class Category {
     private String description;
 
     private String imageUrl;
+
+    /**
+     * Full category path for easy breadcrumb display and hierarchical queries.
+     * e.g., "Electronics >> Mobiles >> Smartphones"
+     */
+    @Column(length = 500)
+    private String path;
+
+    /**
+     * Depth level in hierarchy. 0 = root category, 1 = first level child, etc.
+     */
+    @Column
+    @Builder.Default
+    private Integer level = 0;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")
