@@ -10,8 +10,10 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Repository
@@ -47,4 +49,11 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     List<String> findAllBrands();
 
     List<Product> findByIdIn(List<UUID> ids);
+
+    /**
+     * Batch lookup of existing SKUs.
+     * Much faster than individual existsBySku calls.
+     */
+    @Query("SELECT p.sku FROM Product p WHERE p.sku IN :skus")
+    Set<String> findExistingSkus(@Param("skus") Collection<String> skus);
 }
