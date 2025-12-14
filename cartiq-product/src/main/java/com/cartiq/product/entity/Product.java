@@ -1,5 +1,7 @@
 package com.cartiq.product.entity;
 
+import com.cartiq.common.enums.Currency;
+import com.cartiq.common.enums.Gender;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -46,11 +48,26 @@ public class Product {
     @Column(precision = 10, scale = 2)
     private BigDecimal compareAtPrice;
 
+    /**
+     * Currency for price fields. Defaults to INR.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 3)
+    @Builder.Default
+    private Currency currency = Currency.INR;
+
     @Column(nullable = false)
     @Builder.Default
     private Integer stockQuantity = 0;
 
     private String brand;
+
+    /**
+     * Gender classification for applicable products (clothing, shoes, accessories).
+     * Null for non-applicable categories (electronics, furniture, etc.).
+     */
+    @Enumerated(EnumType.STRING)
+    private Gender gender;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")

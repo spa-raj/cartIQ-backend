@@ -92,3 +92,4 @@ credentials/
 application-local.properties
 application-local.yml
 bootstrap-local.properties
+dataset/popular_ecomm_marketplace-Ecommerce__20250901_20250910.ldjson

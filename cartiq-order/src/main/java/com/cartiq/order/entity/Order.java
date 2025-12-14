@@ -18,6 +18,8 @@ import java.util.UUID;
     @Index(name = "idx_order_user", columnList = "user_id"),
     @Index(name = "idx_order_status", columnList = "status"),
     @Index(name = "idx_order_created", columnList = "created_at")
+}, uniqueConstraints = {
+    @UniqueConstraint(name = "uk_order_number", columnNames = {"order_number"})
 })
 @Getter
 @Setter
@@ -32,7 +34,7 @@ public class Order {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false, unique = true)
+    @Column(name = "order_number", nullable = false)
     private String orderNumber;
 
     @Column(name = "user_id", nullable = false)

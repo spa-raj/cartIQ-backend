@@ -15,6 +15,8 @@ import java.util.UUID;
 @Entity
 @Table(name = "carts", indexes = {
     @Index(name = "idx_cart_user", columnList = "user_id")
+}, uniqueConstraints = {
+    @UniqueConstraint(name = "uk_cart_user", columnNames = {"user_id"})
 })
 @EntityListeners(AuditingEntityListener.class)
 @Getter
@@ -30,7 +32,7 @@ public class Cart {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(name = "user_id", nullable = false, unique = true)
+    @Column(name = "user_id", nullable = false)
     private UUID userId;
 
     @OneToMany(mappedBy = "cart", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
