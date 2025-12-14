@@ -27,6 +27,8 @@
         <module>cartiq-order</module>
         <module>cartiq-kafka</module>
         <module>cartiq-ai</module>
+        <module>cartiq-rag</module>
+        <module>cartiq-seeder</module>
         <module>cartiq-app</module>
     </modules>
 
@@ -68,6 +70,16 @@
             <dependency>
                 <groupId>com.cartiq</groupId>
                 <artifactId>cartiq-ai</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.cartiq</groupId>
+                <artifactId>cartiq-rag</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.cartiq</groupId>
+                <artifactId>cartiq-seeder</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
