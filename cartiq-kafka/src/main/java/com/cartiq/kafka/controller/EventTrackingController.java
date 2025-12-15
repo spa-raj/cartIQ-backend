@@ -21,10 +21,11 @@ import java.util.UUID;
  * Frontend calls these endpoints to stream behavior to Kafka.
  *
  * Endpoints map to Confluent Cloud topics:
- * - POST /api/events/user      → user-events topic
+ * - POST /api/events/user         → user-events topic
  * - POST /api/events/product-view → product-views topic
- * - POST /api/events/cart      → cart-events topic
- * - POST /api/events/order     → order-events topic
+ * - POST /api/events/cart         → cart-events topic
+ * - POST /api/events/order        → order-events topic
+ * - POST /api/events/user-profile → user-profiles topic
  */
 @RestController
 @RequestMapping("/api/events")
@@ -155,6 +156,33 @@ public class EventTrackingController {
         return ResponseEntity.ok(Map.of("status", "tracked", "eventId", event.getEventId()));
     }
 
+    /**
+     * Track user profile update
+     * Called to send user profile snapshot to Kafka
+     * → user-profiles topic
+     */
+    @PostMapping("/user-profile")
+    public ResponseEntity<Map<String, String>> trackUserProfile(
+            @RequestBody @Valid UserProfileRequest request) {
+
+        UserProfileUpdateEvent event = UserProfileUpdateEvent.builder()
+                .eventId(UUID.randomUUID().toString())
+                .userId(request.getUserId())
+                .topCategories(request.getTopCategories())
+                .pricePreference(request.getPricePreference())
+                .totalOrders(request.getTotalOrders())
+                .totalSpent(request.getTotalSpent())
+                .sessionCount(request.getSessionCount())
+                .lastActive(request.getLastActive())
+                .timestamp(Instant.now())
+                .build();
+
+        eventProducer.publishUserProfileUpdate(event);
+        log.debug("Tracked user profile: user={}", request.getUserId());
+
+        return ResponseEntity.ok(Map.of("status", "tracked", "eventId", event.getEventId()));
+    }
+
     // ==================== REQUEST DTOs ====================
 
     @Data
@@ -204,5 +232,16 @@ public class EventTrackingController {
         private OrderStatus status;
         private String shippingCity;
         private String shippingState;
+    }
+
+    @Data
+    public static class UserProfileRequest {
+        private String userId;
+        private List<String> topCategories;
+        private String pricePreference;
+        private Integer totalOrders;
+        private BigDecimal totalSpent;
+        private Integer sessionCount;
+        private Instant lastActive;
     }
 }

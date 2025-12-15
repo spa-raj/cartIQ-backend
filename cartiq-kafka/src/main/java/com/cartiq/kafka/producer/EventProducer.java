@@ -58,6 +58,13 @@ public class EventProducer {
         send(KafkaTopics.ORDER_EVENTS, event.getUserId(), event);
     }
 
+    /**
+     * Publish user profile update events
+     */
+    public void publishUserProfileUpdate(UserProfileUpdateEvent event) {
+        send(KafkaTopics.USER_PROFILES, event.getUserId(), event);
+    }
+
     // ==================== GENERIC SEND ====================
 
     private void send(String topic, String key, Object event) {

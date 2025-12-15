@@ -8,7 +8,8 @@ import com.fasterxml.jackson.annotation.JsonValue;
 public enum CartAction {
     ADD,
     REMOVE,
-    UPDATE_QUANTITY;
+    UPDATE_QUANTITY,
+    CLEAR;
 
     @JsonValue
     public String toJson() {

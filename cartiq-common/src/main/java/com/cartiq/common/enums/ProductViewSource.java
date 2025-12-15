@@ -9,7 +9,9 @@ public enum ProductViewSource {
     SEARCH,
     RECOMMENDATION,
     CATEGORY,
-    DIRECT;
+    DIRECT,
+    CART,
+    HOME;
 
     @JsonValue
     public String toJson() {
