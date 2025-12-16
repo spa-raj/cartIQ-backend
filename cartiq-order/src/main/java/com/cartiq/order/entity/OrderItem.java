@@ -39,6 +39,8 @@ public class OrderItem {
     @Column(nullable = false)
     private String productName;
 
+    private String category;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal unitPrice;
 

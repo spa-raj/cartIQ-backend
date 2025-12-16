@@ -20,6 +20,7 @@ public class OrderItemDTO {
     private UUID productId;
     private String productSku;
     private String productName;
+    private String category;
     private BigDecimal unitPrice;
     private Integer quantity;
     private BigDecimal subtotal;
@@ -32,6 +33,7 @@ public class OrderItemDTO {
                 .productId(item.getProductId())
                 .productSku(item.getProductSku())
                 .productName(item.getProductName())
+                .category(item.getCategory())
                 .unitPrice(item.getUnitPrice())
                 .quantity(item.getQuantity())
                 .subtotal(item.getSubtotal())

@@ -96,6 +96,7 @@ public class OrderService {
                     .productId(cartItem.getProductId())
                     .productSku(product.getSku())
                     .productName(cartItem.getProductName())
+                    .category(product.getCategoryName())
                     .unitPrice(cartItem.getUnitPrice())
                     .quantity(cartItem.getQuantity())
                     .subtotal(cartItem.getSubtotal())
@@ -116,6 +117,7 @@ public class OrderService {
         return OrderDTO.fromEntity(order);
     }
 
+    @Transactional(readOnly = true)
     public OrderDTO getOrderById(UUID orderId, UUID userId) {
         Order order = orderRepository.findByIdWithItems(orderId)
                 .orElseThrow(() -> OrderException.orderNotFound(orderId.toString()));
@@ -127,6 +129,7 @@ public class OrderService {
         return OrderDTO.fromEntity(order);
     }
 
+    @Transactional(readOnly = true)
     public OrderDTO getOrderByNumber(String orderNumber, UUID userId) {
         Order order = orderRepository.findByOrderNumberWithItems(orderNumber)
                 .orElseThrow(() -> OrderException.orderNotFound(orderNumber));
@@ -138,11 +141,13 @@ public class OrderService {
         return OrderDTO.fromEntity(order);
     }
 
+    @Transactional(readOnly = true)
     public Page<OrderSummaryDTO> getUserOrders(UUID userId, Pageable pageable) {
         return orderRepository.findByUserId(userId, pageable)
                 .map(OrderSummaryDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public Page<OrderSummaryDTO> getUserOrdersByStatus(UUID userId, OrderStatus status, Pageable pageable) {
         return orderRepository.findByUserIdAndStatus(userId, status, pageable)
                 .map(OrderSummaryDTO::fromEntity);
@@ -174,16 +179,19 @@ public class OrderService {
     }
 
     // Admin methods
+    @Transactional(readOnly = true)
     public Page<OrderSummaryDTO> getAllOrders(Pageable pageable) {
         return orderRepository.findAll(pageable)
                 .map(OrderSummaryDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public Page<OrderSummaryDTO> getOrdersByStatus(OrderStatus status, Pageable pageable) {
         return orderRepository.findByStatus(status, pageable)
                 .map(OrderSummaryDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public OrderDTO getOrderByIdAdmin(UUID orderId) {
         Order order = orderRepository.findByIdWithItems(orderId)
                 .orElseThrow(() -> OrderException.orderNotFound(orderId.toString()));
