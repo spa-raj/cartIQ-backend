@@ -11,7 +11,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -38,6 +40,14 @@ public class EventTrackingController {
 
     private final EventProducer eventProducer;
 
+    // Flink SQL TO_TIMESTAMP() expects this format: yyyy-MM-dd HH:mm:ss.SSS
+    private static final DateTimeFormatter FLINK_TIMESTAMP_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+
+    private static String now() {
+        return LocalDateTime.now(ZoneOffset.UTC).format(FLINK_TIMESTAMP_FORMAT);
+    }
+
     /**
      * Track user session events (login, logout, page navigation)
      * → user-events topic
@@ -49,14 +59,14 @@ public class EventTrackingController {
 
         UserEvent event = UserEvent.builder()
                 .eventId(UUID.randomUUID().toString())
-                .userId(request.getUserId())
+                .userId(request.getUserId() != null ? request.getUserId() : "")
                 .sessionId(sessionId != null ? sessionId : UUID.randomUUID().toString())
-                .eventType(request.getEventType() != null ? request.getEventType().name() : null)
-                .pageType(request.getPageType() != null ? request.getPageType().name() : null)
-                .pageUrl(request.getPageUrl())
-                .deviceType(request.getDeviceType() != null ? request.getDeviceType().name() : null)
-                .referrer(request.getReferrer())
-                .timestamp(Instant.now().toString())
+                .eventType(request.getEventType() != null ? request.getEventType().name() : "")
+                .pageType(request.getPageType() != null ? request.getPageType().name() : "")
+                .pageUrl(request.getPageUrl() != null ? request.getPageUrl() : "")
+                .deviceType(request.getDeviceType() != null ? request.getDeviceType().name() : "")
+                .referrer(request.getReferrer() != null ? request.getReferrer() : "")
+                .timestamp(now())
                 .build();
 
         eventProducer.publishUserEvent(event);
@@ -77,16 +87,16 @@ public class EventTrackingController {
 
         ProductViewEvent event = ProductViewEvent.builder()
                 .eventId(UUID.randomUUID().toString())
-                .userId(request.getUserId())
+                .userId(request.getUserId() != null ? request.getUserId() : "")
                 .sessionId(sessionId != null ? sessionId : UUID.randomUUID().toString())
-                .productId(request.getProductId())
-                .productName(request.getProductName())
-                .category(request.getCategory())
-                .price(request.getPrice() != null ? request.getPrice().doubleValue() : null)
-                .source(request.getSource() != null ? request.getSource().name() : null)
-                .searchQuery(request.getSearchQuery())
-                .timestamp(Instant.now().toString())
-                .viewDurationMs(request.getViewDurationMs())
+                .productId(request.getProductId() != null ? request.getProductId() : "")
+                .productName(request.getProductName() != null ? request.getProductName() : "")
+                .category(request.getCategory() != null ? request.getCategory() : "")
+                .price(request.getPrice() != null ? request.getPrice().doubleValue() : 0.0)
+                .source(request.getSource() != null ? request.getSource().name() : "")
+                .searchQuery(request.getSearchQuery() != null ? request.getSearchQuery() : "")
+                .timestamp(now())
+                .viewDurationMs(request.getViewDurationMs() != null ? request.getViewDurationMs() : 0L)
                 .build();
 
         eventProducer.publishProductView(event);
@@ -107,17 +117,17 @@ public class EventTrackingController {
 
         CartEvent event = CartEvent.builder()
                 .eventId(UUID.randomUUID().toString())
-                .userId(request.getUserId())
+                .userId(request.getUserId() != null ? request.getUserId() : "")
                 .sessionId(sessionId != null ? sessionId : UUID.randomUUID().toString())
-                .action(request.getAction() != null ? request.getAction().name() : null)
-                .productId(request.getProductId())
-                .productName(request.getProductName())
-                .category(request.getCategory())
-                .quantity(request.getQuantity())
-                .price(request.getPrice() != null ? request.getPrice().doubleValue() : null)
-                .cartTotal(request.getCartTotal() != null ? request.getCartTotal().doubleValue() : null)
-                .cartItemCount(request.getCartItemCount())
-                .timestamp(Instant.now().toString())
+                .action(request.getAction() != null ? request.getAction().name() : "")
+                .productId(request.getProductId() != null ? request.getProductId() : "")
+                .productName(request.getProductName() != null ? request.getProductName() : "")
+                .category(request.getCategory() != null ? request.getCategory() : "")
+                .quantity(request.getQuantity() != null ? request.getQuantity() : 0)
+                .price(request.getPrice() != null ? request.getPrice().doubleValue() : 0.0)
+                .cartTotal(request.getCartTotal() != null ? request.getCartTotal().doubleValue() : 0.0)
+                .cartItemCount(request.getCartItemCount() != null ? request.getCartItemCount() : 0)
+                .timestamp(now())
                 .build();
 
         eventProducer.publishCartEvent(event);
@@ -140,28 +150,28 @@ public class EventTrackingController {
         List<OrderItemDto> items = request.getItems() != null
                 ? request.getItems().stream()
                     .map(item -> OrderItemDto.builder()
-                            .productId(item.getProductId())
-                            .productName(item.getProductName())
-                            .category(item.getCategory())
-                            .quantity(item.getQuantity())
-                            .price(item.getPrice() != null ? item.getPrice().doubleValue() : null)
+                            .productId(item.getProductId() != null ? item.getProductId() : "")
+                            .productName(item.getProductName() != null ? item.getProductName() : "")
+                            .category(item.getCategory() != null ? item.getCategory() : "")
+                            .quantity(item.getQuantity() != null ? item.getQuantity() : 0)
+                            .price(item.getPrice() != null ? item.getPrice().doubleValue() : 0.0)
                             .build())
                     .collect(Collectors.toList())
-                : null;
+                : List.of();
 
         OrderEvent event = OrderEvent.builder()
                 .eventId(UUID.randomUUID().toString())
-                .userId(request.getUserId())
-                .orderId(request.getOrderId())
+                .userId(request.getUserId() != null ? request.getUserId() : "")
+                .orderId(request.getOrderId() != null ? request.getOrderId() : "")
                 .items(items)
-                .subtotal(request.getSubtotal() != null ? request.getSubtotal().doubleValue() : null)
-                .discount(request.getDiscount() != null ? request.getDiscount().doubleValue() : null)
-                .total(request.getTotal() != null ? request.getTotal().doubleValue() : null)
-                .paymentMethod(request.getPaymentMethod() != null ? request.getPaymentMethod().name() : null)
-                .status(request.getStatus() != null ? request.getStatus().name() : null)
-                .shippingCity(request.getShippingCity())
-                .shippingState(request.getShippingState())
-                .timestamp(Instant.now().toString())
+                .subtotal(request.getSubtotal() != null ? request.getSubtotal().doubleValue() : 0.0)
+                .discount(request.getDiscount() != null ? request.getDiscount().doubleValue() : 0.0)
+                .total(request.getTotal() != null ? request.getTotal().doubleValue() : 0.0)
+                .paymentMethod(request.getPaymentMethod() != null ? request.getPaymentMethod().name() : "")
+                .status(request.getStatus() != null ? request.getStatus().name() : "")
+                .shippingCity(request.getShippingCity() != null ? request.getShippingCity() : "")
+                .shippingState(request.getShippingState() != null ? request.getShippingState() : "")
+                .timestamp(now())
                 .build();
 
         eventProducer.publishOrderEvent(event);
