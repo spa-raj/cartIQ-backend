@@ -35,7 +35,6 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/events")
 @RequiredArgsConstructor
 @Slf4j
-@CrossOrigin(origins = "*") // Configure properly for production
 public class EventTrackingController {
 
     private final EventProducer eventProducer;
