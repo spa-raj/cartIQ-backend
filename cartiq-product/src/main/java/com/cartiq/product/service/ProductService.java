@@ -28,38 +28,45 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
 
+    @Transactional(readOnly = true)
     public Page<ProductDTO> getAllProducts(Pageable pageable) {
         return productRepository.findByStatus(ProductStatus.ACTIVE, pageable)
                 .map(ProductDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public ProductDTO getProductById(UUID id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> ProductException.productNotFound(id.toString()));
         return ProductDTO.fromEntity(product);
     }
 
+    @Transactional(readOnly = true)
     public ProductDTO getProductBySku(String sku) {
         Product product = productRepository.findBySku(sku)
                 .orElseThrow(() -> ProductException.productNotFound(sku));
         return ProductDTO.fromEntity(product);
     }
 
+    @Transactional(readOnly = true)
     public Page<ProductDTO> getProductsByCategory(UUID categoryId, Pageable pageable) {
         return productRepository.findByCategoryIdAndStatus(categoryId, ProductStatus.ACTIVE, pageable)
                 .map(ProductDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public Page<ProductDTO> getProductsByBrand(String brand, Pageable pageable) {
         return productRepository.findByBrand(brand, pageable)
                 .map(ProductDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public Page<ProductDTO> searchProducts(String query, Pageable pageable) {
         return productRepository.search(query, pageable)
                 .map(ProductDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public Page<ProductDTO> getProductsByPriceRange(BigDecimal minPrice, BigDecimal maxPrice, Pageable pageable) {
         if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
             throw ProductException.invalidPriceRange();
@@ -71,15 +78,18 @@ public class ProductService {
         ).map(ProductDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public Page<ProductDTO> getFeaturedProducts(Pageable pageable) {
         return productRepository.findFeaturedProducts(pageable)
                 .map(ProductDTO::fromEntity);
     }
 
+    @Transactional(readOnly = true)
     public List<String> getAllBrands() {
         return productRepository.findAllBrands();
     }
 
+    @Transactional(readOnly = true)
     public List<ProductDTO> getProductsByIds(List<UUID> ids) {
         return productRepository.findByIdIn(ids).stream()
                 .map(ProductDTO::fromEntity)

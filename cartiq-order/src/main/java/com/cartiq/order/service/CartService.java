@@ -27,6 +27,7 @@ public class CartService {
     private final CartItemRepository cartItemRepository;
     private final ProductService productService;
 
+    @Transactional
     public CartDTO getCart(UUID userId) {
         Cart cart = getOrCreateCart(userId);
         return CartDTO.fromEntity(cart);
@@ -145,6 +146,7 @@ public class CartService {
         log.info("Cleared cart: cartId={}, userId={}", cart.getId(), userId);
     }
 
+    @Transactional(readOnly = true)
     public int getCartItemCount(UUID userId) {
         return cartRepository.findByUserIdWithItems(userId)
                 .map(Cart::getTotalItems)

@@ -67,6 +67,7 @@ public class UserService {
         return AuthResponse.of(token, jwtService.getExpirationTime(), UserDTO.fromEntity(user));
     }
 
+    @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         String email = request.getEmail().toLowerCase().trim();
 
@@ -103,12 +104,14 @@ public class UserService {
         }
     }
 
+    @Transactional(readOnly = true)
     public UserDTO getUserById(UUID userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> UserException.userNotFound(userId.toString()));
         return UserDTO.fromEntity(user);
     }
 
+    @Transactional(readOnly = true)
     public UserDTO getUserByEmail(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> UserException.userNotFound(email));
@@ -139,6 +142,7 @@ public class UserService {
         return UserDTO.fromEntity(user);
     }
 
+    @Transactional(readOnly = true)
     public UserPreferenceDTO getUserPreferences(UUID userId) {
         UserPreference preference = preferenceRepository.findByUserId(userId)
                 .orElseThrow(UserException::preferencesNotFound);

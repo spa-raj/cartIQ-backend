@@ -21,24 +21,28 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
 
+    @Transactional(readOnly = true)
     public List<CategoryDTO> getAllCategories() {
         return categoryRepository.findAllActiveOrdered().stream()
                 .map(CategoryDTO::fromEntity)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public List<CategoryDTO> getRootCategories() {
         return categoryRepository.findRootCategories().stream()
                 .map(CategoryDTO::fromEntityWithSubCategories)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public CategoryDTO getCategoryById(UUID id) {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> ProductException.categoryNotFound(id.toString()));
         return CategoryDTO.fromEntityWithSubCategories(category);
     }
 
+    @Transactional(readOnly = true)
     public List<CategoryDTO> getSubCategories(UUID parentId) {
         return categoryRepository.findByParentCategoryIdAndActiveTrue(parentId).stream()
                 .map(CategoryDTO::fromEntity)
