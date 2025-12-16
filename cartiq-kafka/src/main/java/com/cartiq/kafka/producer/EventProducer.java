@@ -58,12 +58,7 @@ public class EventProducer {
         send(KafkaTopics.ORDER_EVENTS, event.getUserId(), event);
     }
 
-    /**
-     * Publish user profile update events
-     */
-    public void publishUserProfileUpdate(UserProfileUpdateEvent event) {
-        send(KafkaTopics.USER_PROFILES, event.getUserId(), event);
-    }
+    // Note: user-profiles topic is populated by Flink, not by this producer
 
     // ==================== GENERIC SEND ====================
 

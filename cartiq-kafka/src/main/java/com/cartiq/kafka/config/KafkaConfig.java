@@ -1,5 +1,9 @@
 package com.cartiq.kafka.config;
 
+import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
+import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
+import io.confluent.kafka.streams.serdes.avro.ReflectionAvroDeserializer;
+import io.confluent.kafka.streams.serdes.avro.ReflectionAvroSerializer;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -11,21 +15,21 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
-import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
-import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Kafka configuration for Confluent Cloud.
- * Uses Jackson 3 serializers (JacksonJsonSerializer/JacksonJsonDeserializer).
+ * Kafka configuration for Confluent Cloud with Schema Registry.
+ * Uses Confluent's ReflectionAvroSerializer for POJO to Avro serialization.
  *
  * Required environment variables:
  * - CONFLUENT_BOOTSTRAP_SERVERS: Your Confluent Cloud bootstrap server
  * - CONFLUENT_API_KEY: Your Confluent Cloud API key
  * - CONFLUENT_API_SECRET: Your Confluent Cloud API secret
+ * - CONFLUENT_SCHEMA_REGISTRY_URL: Your Confluent Schema Registry URL
+ * - CONFLUENT_SR_API_KEY: Schema Registry API key
+ * - CONFLUENT_SR_API_SECRET: Schema Registry API secret
  */
 @Configuration
 public class KafkaConfig {
@@ -39,15 +43,17 @@ public class KafkaConfig {
     @Value("${confluent.api.secret:}")
     private String apiSecret;
 
+    @Value("${confluent.schema.registry.url:}")
+    private String schemaRegistryUrl;
+
+    @Value("${confluent.schema.registry.api.key:}")
+    private String schemaRegistryApiKey;
+
+    @Value("${confluent.schema.registry.api.secret:}")
+    private String schemaRegistryApiSecret;
+
     @Value("${spring.kafka.consumer.group-id:cartiq-group}")
     private String groupId;
-
-    @Bean
-    public JsonMapper kafkaJsonMapper() {
-        return JsonMapper.builder()
-                .findAndAddModules()
-                .build();
-    }
 
     private Map<String, Object> commonConfigs() {
         Map<String, Object> props = new HashMap<>();
@@ -65,19 +71,39 @@ public class KafkaConfig {
         return props;
     }
 
+    private Map<String, Object> schemaRegistryConfigs() {
+        Map<String, Object> props = new HashMap<>();
+        if (schemaRegistryUrl != null && !schemaRegistryUrl.isEmpty()) {
+            props.put(KafkaAvroSerializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+            // Schema Registry authentication for Confluent Cloud
+            if (schemaRegistryApiKey != null && !schemaRegistryApiKey.isEmpty()) {
+                props.put("basic.auth.credentials.source", "USER_INFO");
+                props.put("schema.registry.basic.auth.user.info",
+                        schemaRegistryApiKey + ":" + schemaRegistryApiSecret);
+            }
+            // Auto-register schemas
+            props.put(KafkaAvroSerializerConfig.AUTO_REGISTER_SCHEMAS, true);
+            // Use TopicNameStrategy for subject naming
+            props.put(KafkaAvroSerializerConfig.VALUE_SUBJECT_NAME_STRATEGY,
+                    "io.confluent.kafka.serializers.subject.TopicNameStrategy");
+        }
+        return props;
+    }
+
     // ==================== PRODUCER CONFIG ====================
 
     @Bean
-    public ProducerFactory<String, Object> producerFactory(JsonMapper kafkaJsonMapper) {
+    public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> props = new HashMap<>(commonConfigs());
+        props.putAll(schemaRegistryConfigs());
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        // Use ReflectionAvroSerializer for POJO serialization
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ReflectionAvroSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
 
-        JacksonJsonSerializer<Object> jsonSerializer = new JacksonJsonSerializer<>(kafkaJsonMapper);
-
-        return new DefaultKafkaProducerFactory<>(props, new StringSerializer(), jsonSerializer);
+        return new DefaultKafkaProducerFactory<>(props);
     }
 
     @Bean
@@ -88,15 +114,17 @@ public class KafkaConfig {
     // ==================== CONSUMER CONFIG ====================
 
     @Bean
-    public ConsumerFactory<String, Object> consumerFactory(JsonMapper kafkaJsonMapper) {
+    public ConsumerFactory<String, Object> consumerFactory() {
         Map<String, Object> props = new HashMap<>(commonConfigs());
+        props.putAll(schemaRegistryConfigs());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        // Use ReflectionAvroDeserializer for POJO deserialization
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ReflectionAvroDeserializer.class);
+        props.put(KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, false);
 
-        JacksonJsonDeserializer<Object> jsonDeserializer = new JacksonJsonDeserializer<>(Object.class, kafkaJsonMapper);
-        jsonDeserializer.addTrustedPackages("com.cartiq.*");
-
-        return new DefaultKafkaConsumerFactory<>(props, new StringDeserializer(), jsonDeserializer);
+        return new DefaultKafkaConsumerFactory<>(props);
     }
 
     @Bean

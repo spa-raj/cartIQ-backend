@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * REST controller for tracking user events.
@@ -25,7 +26,8 @@ import java.util.UUID;
  * - POST /api/events/product-view → product-views topic
  * - POST /api/events/cart         → cart-events topic
  * - POST /api/events/order        → order-events topic
- * - POST /api/events/user-profile → user-profiles topic
+ *
+ * Note: user-profiles topic is populated by Flink aggregations, not this controller
  */
 @RestController
 @RequestMapping("/api/events")
@@ -49,12 +51,12 @@ public class EventTrackingController {
                 .eventId(UUID.randomUUID().toString())
                 .userId(request.getUserId())
                 .sessionId(sessionId != null ? sessionId : UUID.randomUUID().toString())
-                .eventType(request.getEventType())
-                .pageType(request.getPageType())
+                .eventType(request.getEventType() != null ? request.getEventType().name() : null)
+                .pageType(request.getPageType() != null ? request.getPageType().name() : null)
                 .pageUrl(request.getPageUrl())
-                .deviceType(request.getDeviceType())
+                .deviceType(request.getDeviceType() != null ? request.getDeviceType().name() : null)
                 .referrer(request.getReferrer())
-                .timestamp(Instant.now())
+                .timestamp(Instant.now().toString())
                 .build();
 
         eventProducer.publishUserEvent(event);
@@ -80,10 +82,10 @@ public class EventTrackingController {
                 .productId(request.getProductId())
                 .productName(request.getProductName())
                 .category(request.getCategory())
-                .price(request.getPrice())
-                .source(request.getSource())
+                .price(request.getPrice() != null ? request.getPrice().doubleValue() : null)
+                .source(request.getSource() != null ? request.getSource().name() : null)
                 .searchQuery(request.getSearchQuery())
-                .timestamp(Instant.now())
+                .timestamp(Instant.now().toString())
                 .viewDurationMs(request.getViewDurationMs())
                 .build();
 
@@ -107,15 +109,15 @@ public class EventTrackingController {
                 .eventId(UUID.randomUUID().toString())
                 .userId(request.getUserId())
                 .sessionId(sessionId != null ? sessionId : UUID.randomUUID().toString())
-                .action(request.getAction())
+                .action(request.getAction() != null ? request.getAction().name() : null)
                 .productId(request.getProductId())
                 .productName(request.getProductName())
                 .category(request.getCategory())
                 .quantity(request.getQuantity())
-                .price(request.getPrice())
-                .cartTotal(request.getCartTotal())
+                .price(request.getPrice() != null ? request.getPrice().doubleValue() : null)
+                .cartTotal(request.getCartTotal() != null ? request.getCartTotal().doubleValue() : null)
                 .cartItemCount(request.getCartItemCount())
-                .timestamp(Instant.now())
+                .timestamp(Instant.now().toString())
                 .build();
 
         eventProducer.publishCartEvent(event);
@@ -134,51 +136,37 @@ public class EventTrackingController {
     public ResponseEntity<Map<String, String>> trackOrderEvent(
             @RequestBody @Valid OrderRequest request) {
 
+        // Convert items to Avro-compatible DTOs
+        List<OrderItemDto> items = request.getItems() != null
+                ? request.getItems().stream()
+                    .map(item -> OrderItemDto.builder()
+                            .productId(item.getProductId())
+                            .productName(item.getProductName())
+                            .category(item.getCategory())
+                            .quantity(item.getQuantity())
+                            .price(item.getPrice() != null ? item.getPrice().doubleValue() : null)
+                            .build())
+                    .collect(Collectors.toList())
+                : null;
+
         OrderEvent event = OrderEvent.builder()
                 .eventId(UUID.randomUUID().toString())
                 .userId(request.getUserId())
                 .orderId(request.getOrderId())
-                .items(request.getItems())
-                .subtotal(request.getSubtotal())
-                .discount(request.getDiscount())
-                .total(request.getTotal())
-                .paymentMethod(request.getPaymentMethod())
-                .status(request.getStatus())
+                .items(items)
+                .subtotal(request.getSubtotal() != null ? request.getSubtotal().doubleValue() : null)
+                .discount(request.getDiscount() != null ? request.getDiscount().doubleValue() : null)
+                .total(request.getTotal() != null ? request.getTotal().doubleValue() : null)
+                .paymentMethod(request.getPaymentMethod() != null ? request.getPaymentMethod().name() : null)
+                .status(request.getStatus() != null ? request.getStatus().name() : null)
                 .shippingCity(request.getShippingCity())
                 .shippingState(request.getShippingState())
-                .timestamp(Instant.now())
+                .timestamp(Instant.now().toString())
                 .build();
 
         eventProducer.publishOrderEvent(event);
         log.debug("Tracked order: user={}, orderId={}, total={}",
                 request.getUserId(), request.getOrderId(), request.getTotal());
-
-        return ResponseEntity.ok(Map.of("status", "tracked", "eventId", event.getEventId()));
-    }
-
-    /**
-     * Track user profile update
-     * Called to send user profile snapshot to Kafka
-     * → user-profiles topic
-     */
-    @PostMapping("/user-profile")
-    public ResponseEntity<Map<String, String>> trackUserProfile(
-            @RequestBody @Valid UserProfileRequest request) {
-
-        UserProfileUpdateEvent event = UserProfileUpdateEvent.builder()
-                .eventId(UUID.randomUUID().toString())
-                .userId(request.getUserId())
-                .topCategories(request.getTopCategories())
-                .pricePreference(request.getPricePreference())
-                .totalOrders(request.getTotalOrders())
-                .totalSpent(request.getTotalSpent())
-                .sessionCount(request.getSessionCount())
-                .lastActive(request.getLastActive())
-                .timestamp(Instant.now())
-                .build();
-
-        eventProducer.publishUserProfileUpdate(event);
-        log.debug("Tracked user profile: user={}", request.getUserId());
 
         return ResponseEntity.ok(Map.of("status", "tracked", "eventId", event.getEventId()));
     }
@@ -224,7 +212,7 @@ public class EventTrackingController {
     public static class OrderRequest {
         private String userId;
         private String orderId;
-        private List<OrderItemDto> items;
+        private List<OrderItemRequest> items;
         private BigDecimal subtotal;
         private BigDecimal discount;
         private BigDecimal total;
@@ -235,13 +223,11 @@ public class EventTrackingController {
     }
 
     @Data
-    public static class UserProfileRequest {
-        private String userId;
-        private List<String> topCategories;
-        private String pricePreference;
-        private Integer totalOrders;
-        private BigDecimal totalSpent;
-        private Integer sessionCount;
-        private Instant lastActive;
+    public static class OrderItemRequest {
+        private String productId;
+        private String productName;
+        private String category;
+        private Integer quantity;
+        private BigDecimal price;
     }
 }

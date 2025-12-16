@@ -1,18 +1,16 @@
 package com.cartiq.kafka.dto;
 
-import com.cartiq.common.enums.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 
 /**
- * Event DTOs for Kafka streaming.
- * These are published to Kafka topics and consumed by Flink/AI services.
+ * Event DTOs for Kafka streaming with Avro serialization.
+ * Uses Avro-compatible types: String, Double, Long, Integer, Boolean, List.
+ * Enums are serialized as Strings. Timestamps are ISO-8601 strings.
  *
  * Topics (matching Confluent Cloud):
  * - user-events: UserEvent
@@ -33,12 +31,12 @@ public class KafkaEvents {
         private String eventId;
         private String userId;
         private String sessionId;
-        private EventType eventType;
-        private PageType pageType;
+        private String eventType;       // enum as string for Avro
+        private String pageType;        // enum as string for Avro
         private String pageUrl;
-        private DeviceType deviceType;
+        private String deviceType;      // enum as string for Avro
         private String referrer;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
     }
 
     // ==================== PRODUCT VIEW EVENTS (product-views topic) ====================
@@ -54,10 +52,10 @@ public class KafkaEvents {
         private String productId;
         private String productName;
         private String category;
-        private BigDecimal price;
-        private ProductViewSource source;
-        private String searchQuery;     // if came from search
-        private Instant timestamp;
+        private Double price;
+        private String source;          // enum as string for Avro
+        private String searchQuery;
+        private String timestamp;       // ISO-8601 format for Avro
         private Long viewDurationMs;
     }
 
@@ -74,7 +72,7 @@ public class KafkaEvents {
         private String priceRangeFilter;
         private Integer resultsCount;
         private List<String> clickedProductIds;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
     }
 
     @Data
@@ -85,15 +83,15 @@ public class KafkaEvents {
         private String eventId;
         private String userId;
         private String sessionId;
-        private CartAction action;
+        private String action;          // enum as string for Avro
         private String productId;
         private String productName;
         private String category;
         private Integer quantity;
-        private BigDecimal price;
-        private BigDecimal cartTotal;
+        private Double price;
+        private Double cartTotal;
         private Integer cartItemCount;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
     }
 
     @Data
@@ -104,13 +102,13 @@ public class KafkaEvents {
         private String eventId;
         private String userId;
         private String sessionId;
-        private PageType pageType;
+        private String pageType;        // enum as string for Avro
         private String pageUrl;
         private String productId;
         private String category;
-        private DeviceType deviceType;
+        private String deviceType;      // enum as string for Avro
         private String referrer;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
         private Long durationMs;
     }
 
@@ -125,14 +123,14 @@ public class KafkaEvents {
         private String userId;
         private String orderId;
         private List<OrderItemDto> items;
-        private BigDecimal subtotal;
-        private BigDecimal discount;
-        private BigDecimal total;
-        private PaymentMethod paymentMethod;
-        private OrderStatus status;
+        private Double subtotal;
+        private Double discount;
+        private Double total;
+        private String paymentMethod;   // enum as string for Avro
+        private String status;          // enum as string for Avro
         private String shippingCity;
         private String shippingState;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
     }
 
     @Data
@@ -144,7 +142,7 @@ public class KafkaEvents {
         private String productName;
         private String category;
         private Integer quantity;
-        private BigDecimal price;
+        private Double price;
     }
 
     // ==================== AI CHAT EVENTS ====================
@@ -161,9 +159,9 @@ public class KafkaEvents {
         private List<String> recentlyViewedProductIds;
         private List<String> recentCategories;
         private List<String> cartProductIds;
-        private BigDecimal cartTotal;
+        private Double cartTotal;
         private UserContext userContext;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
     }
 
     @Data
@@ -192,7 +190,7 @@ public class KafkaEvents {
         private Double confidenceScore;
         private Long processingTimeMs;
         private String modelUsed;
-        private Instant timestamp;
+        private String timestamp;       // ISO-8601 format for Avro
     }
 
     @Data
@@ -202,10 +200,10 @@ public class KafkaEvents {
     public static class ProductRecommendation {
         private String productId;
         private String productName;
-        private BigDecimal price;
+        private Double price;
         private String category;
         private Double relevanceScore;
-        private String reason;          // why this was recommended
+        private String reason;
     }
 
     // ==================== USER PROFILE EVENTS ====================
@@ -220,9 +218,9 @@ public class KafkaEvents {
         private List<String> topCategories;
         private String pricePreference;
         private Integer totalOrders;
-        private BigDecimal totalSpent;
+        private Double totalSpent;
         private Integer sessionCount;
-        private Instant lastActive;
-        private Instant timestamp;
+        private String lastActive;      // ISO-8601 format for Avro
+        private String timestamp;       // ISO-8601 format for Avro
     }
 }
