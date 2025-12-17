@@ -1,8 +1,8 @@
 # CartIQ Backend Dockerfile
 # Multi-stage build for modular monolith
 
-# Stage 1: Build
-FROM eclipse-temurin:17-jdk-alpine AS builder
+# Stage 1: Build (Amazon Corretto - reliable alternative to Docker Hub images)
+FROM amazoncorretto:17-alpine AS builder
 
 WORKDIR /app
 
@@ -36,8 +36,8 @@ COPY cartiq-app/src cartiq-app/src
 # Build only cartiq-app and its dependencies (excludes seeder, rag)
 RUN mvn clean package -pl cartiq-app -am -DskipTests -B
 
-# Stage 2: Production (JRE only - smaller attack surface)
-FROM eclipse-temurin:17-jre-alpine
+# Stage 2: Production
+FROM amazoncorretto:17-alpine
 
 WORKDIR /app
 
