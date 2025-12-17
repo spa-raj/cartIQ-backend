@@ -76,20 +76,16 @@ jobs:
             --min-instances=0
             --max-instances=10
             --port=8080
+            --timeout=300
+            --cpu-boost
             --add-cloudsql-instances=${{ secrets.GCP_PROJECT_ID }}:${{ env.REGION }}:${{ vars.CLOUD_SQL_INSTANCE_NAME || 'cartiq-db' }}
           env_vars: |
             SPRING_PROFILES_ACTIVE=prod
             GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
             GCP_LOCATION=${{ env.REGION }}
-            SPRING_DATASOURCE_URL=jdbc:postgresql:///${{ vars.DB_NAME  }}?socketFactory=com.google.cloud.sql.postgres.SocketFactory&cloudSqlInstance=${{ secrets.GCP_PROJECT_ID }}:${{ env.REGION }}:${{ vars.CLOUD_SQL_INSTANCE_NAME }}
-            SPRING_DATASOURCE_USERNAME=${{ vars.DB_USER }}
+            SPRING_DATASOURCE_URL=jdbc:postgresql:///${{ vars.DB_NAME || 'cartiq' }}?socketFactory=com.google.cloud.sql.postgres.SocketFactory&cloudSqlInstance=${{ secrets.GCP_PROJECT_ID }}:${{ env.REGION }}:${{ vars.CLOUD_SQL_INSTANCE_NAME || 'cartiq-db' }}
+            SPRING_DATASOURCE_USERNAME=${{ vars.DB_USER || 'cartiq-user' }}
             CONFLUENT_BOOTSTRAP_SERVERS=${{ secrets.CONFLUENT_BOOTSTRAP_SERVERS }}
-            VECTOR_SEARCH_INDEX_ENDPOINT=${{ secrets.VECTOR_SEARCH_INDEX_ENDPOINT }}
-            VECTOR_SEARCH_DEPLOYED_INDEX_ID=${{ vars.VECTOR_SEARCH_DEPLOYED_INDEX_ID }}
-            VECTOR_SEARCH_API_ENDPOINT=${{ vars.VECTOR_SEARCH_API_ENDPOINT }}
-            REDIS_HOST=${{ secrets.REDIS_HOST }}
-            REDIS_PORT=${{ vars.REDIS_PORT }}
-            RAG_ENABLED=${{ vars.RAG_ENABLED }}
             ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
             CORS_ALLOWED_ORIGINS=${{ vars.CORS_ALLOWED_ORIGINS }}
           secrets: |

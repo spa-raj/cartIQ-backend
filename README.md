@@ -195,6 +195,49 @@ cartiq-backend/
 
 ---
 
+## Troubleshooting Deployment
+
+### Container fails to start
+
+If you see `The user-provided container failed to start and listen on the port`:
+
+1. **Check GCP Secrets exist:**
+   ```bash
+   gcloud secrets list --project=YOUR_PROJECT_ID
+   ```
+   Required secrets: `jwt-secret`, `db-password`, `confluent-api-key`, `confluent-api-secret`, `admin-password`
+
+2. **Grant Secret Manager access to Cloud Run:**
+   ```bash
+   PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format='value(projectNumber)')
+   gcloud secrets add-iam-policy-binding jwt-secret \
+     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+     --role="roles/secretmanager.secretAccessor"
+   # Repeat for other secrets...
+   ```
+
+3. **Verify Cloud SQL instance exists:**
+   ```bash
+   gcloud sql instances list --project=YOUR_PROJECT_ID
+   ```
+
+4. **Check Cloud Run logs:**
+   ```bash
+   gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=cartiq-backend" \
+     --limit=50 --project=YOUR_PROJECT_ID
+   ```
+
+### Permission denied on logs
+
+Grant yourself logging access:
+```bash
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="user:your-email@example.com" \
+  --role="roles/logging.viewer"
+```
+
+---
+
 ## License
 
 MIT
