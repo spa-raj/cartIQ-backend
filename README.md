@@ -45,6 +45,7 @@ Go to: **Settings → Secrets and variables → Actions → Secrets**
 | `WIF_PROVIDER` | Yes | Workload Identity Federation provider | `projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `WIF_SERVICE_ACCOUNT` | Yes | Service account email | `github-actions@my-project-123456.iam.gserviceaccount.com` |
 | `CONFLUENT_BOOTSTRAP_SERVERS` | Yes | Kafka bootstrap servers | `pkc-xxxxx.region.provider.confluent.cloud:9092` |
+| `CONFLUENT_SCHEMA_REGISTRY_URL` | Yes | Schema Registry URL | `https://psrc-xxxxx.region.provider.confluent.cloud` |
 | `VECTOR_SEARCH_INDEX_ENDPOINT` | No | Vector Search endpoint (for RAG) | `projects/123456789/locations/us-central1/indexEndpoints/987654321` |
 | `REDIS_HOST` | No | Redis internal IP (for RAG) | `10.0.0.1` |
 
@@ -78,13 +79,21 @@ echo -n "your-secure-jwt-secret-at-least-256-bits-long" | \
 echo -n "your-db-password" | \
   gcloud secrets create db-password --data-file=-
 
-# Confluent Cloud API key
+# Confluent Cloud API key (Kafka)
 echo -n "your-confluent-api-key" | \
   gcloud secrets create confluent-api-key --data-file=-
 
-# Confluent Cloud API secret
+# Confluent Cloud API secret (Kafka)
 echo -n "your-confluent-api-secret" | \
   gcloud secrets create confluent-api-secret --data-file=-
+
+# Schema Registry API key
+echo -n "your-schema-registry-api-key" | \
+  gcloud secrets create confluent-sr-api-key --data-file=-
+
+# Schema Registry API secret
+echo -n "your-schema-registry-api-secret" | \
+  gcloud secrets create confluent-sr-api-secret --data-file=-
 
 # Admin password (min 8 chars, uppercase, lowercase, digit, special char)
 echo -n "AdminPass123!" | \
@@ -95,8 +104,10 @@ echo -n "AdminPass123!" | \
 |-----------------|-------------|
 | `jwt-secret` | JWT signing key |
 | `db-password` | PostgreSQL password |
-| `confluent-api-key` | Confluent Cloud API key |
-| `confluent-api-secret` | Confluent Cloud API secret |
+| `confluent-api-key` | Confluent Cloud Kafka API key |
+| `confluent-api-secret` | Confluent Cloud Kafka API secret |
+| `confluent-sr-api-key` | Schema Registry API key |
+| `confluent-sr-api-secret` | Schema Registry API secret |
 | `admin-password` | Initial admin user password |
 
 ---
