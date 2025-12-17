@@ -59,7 +59,7 @@
         <dependency>
             <groupId>com.google.cloud.sql</groupId>
             <artifactId>postgres-socket-factory</artifactId>
-            <version>1.15.0</version>
+            <version>1.21.0</version>
         </dependency>
 
         <!-- Actuator for health checks -->
