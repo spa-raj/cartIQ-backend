@@ -1,13 +1,14 @@
 # CartIQ Backend Dockerfile
 # Multi-stage build for modular monolith
+# Using Microsoft MCR + Google Distroless to avoid Docker Hub auth issues
 
-# Stage 1: Build (Amazon Corretto - reliable alternative to Docker Hub images)
-FROM amazoncorretto:17-alpine AS builder
+# Stage 1: Build (Microsoft OpenJDK - hosted on MCR, not Docker Hub)
+FROM mcr.microsoft.com/openjdk/jdk:17-ubuntu AS builder
 
 WORKDIR /app
 
 # Install Maven
-RUN apk add --no-cache maven
+RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
 
 # Copy parent POM and all module POMs first (for dependency caching)
 COPY pom.xml .
@@ -36,26 +37,20 @@ COPY cartiq-app/src cartiq-app/src
 # Build only cartiq-app and its dependencies (excludes seeder, rag)
 RUN mvn clean package -pl cartiq-app -am -DskipTests -B
 
-# Stage 2: Production
-FROM amazoncorretto:17-alpine
+# Stage 2: Production (Google Distroless - minimal and secure)
+FROM gcr.io/distroless/java17-debian12
 
 WORKDIR /app
 
-# Create non-root user for security
-RUN addgroup -S cartiq && adduser -S cartiq -G cartiq
-
-# Copy the built JAR with proper ownership
-COPY --from=builder --chown=cartiq:cartiq /app/cartiq-app/target/cartiq-app-*.jar app.jar
-
-# Switch to non-root user
-USER cartiq
+# Copy the built JAR
+COPY --from=builder /app/cartiq-app/target/cartiq-app-*.jar app.jar
 
 # Cloud Run uses PORT env variable (default 8080)
 ENV PORT=8080
 EXPOSE 8080
 
-# JVM options for containers
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+# JVM options via JAVA_TOOL_OPTIONS (distroless has no shell)
+ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
-# Run the application
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar --server.port=$PORT"]
+# Run the application (exec form required - no shell in distroless)
+ENTRYPOINT ["java", "-jar", "app.jar", "--server.port=8080"]
