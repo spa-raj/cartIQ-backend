@@ -62,6 +62,13 @@
             <version>1.21.0</version>
         </dependency>
 
+        <!-- Fix transitive dependency conflict for google-auth-library -->
+        <dependency>
+            <groupId>com.google.auth</groupId>
+            <artifactId>google-auth-library-credentials</artifactId>
+            <version>1.33.0</version>
+        </dependency>
+
         <!-- Actuator for health checks -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
