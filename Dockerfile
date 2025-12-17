@@ -53,4 +53,5 @@ EXPOSE 8080
 ENV JAVA_TOOL_OPTIONS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
 # Run the application (exec form required - no shell in distroless)
-ENTRYPOINT ["java", "-jar", "app.jar", "--server.port=8080"]
+# Spring Boot reads PORT env var automatically via application.properties
+ENTRYPOINT ["java", "-jar", "app.jar"]
