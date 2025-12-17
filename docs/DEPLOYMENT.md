@@ -262,6 +262,105 @@ curl -X POST $SERVICE_URL/api/auth/login \
 
 ---
 
+## GitHub Actions Deployment (Recommended)
+
+For automated CI/CD deployments, use the GitHub Actions workflow at `.github/workflows/deploy.yml`.
+
+### Step 1: Create GCP Service Account
+
+```bash
+# Create service account
+gcloud iam service-accounts create github-actions \
+    --display-name="GitHub Actions"
+
+# Grant required roles
+PROJECT_ID=$(gcloud config get-value project)
+SA_EMAIL="github-actions@${PROJECT_ID}.iam.gserviceaccount.com"
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/run.admin"
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/storage.admin"
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/iam.serviceAccountUser"
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/secretmanager.secretAccessor"
+
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/cloudsql.client"
+
+# Create and download key
+gcloud iam service-accounts keys create github-actions-key.json \
+    --iam-account=${SA_EMAIL}
+```
+
+### Step 2: Configure GitHub Secrets
+
+Go to your GitHub repository → Settings → Secrets and variables → Actions
+
+**Required Secrets:**
+
+| Secret Name | Value |
+|------------|-------|
+| `GCP_PROJECT_ID` | Your GCP project ID (e.g., `cartiq-480815`) |
+| `GCP_SA_KEY` | Contents of `github-actions-key.json` (base64 encoded JSON) |
+| `CONFLUENT_BOOTSTRAP_SERVERS` | Kafka bootstrap servers |
+
+### Step 3: Configure GitHub Variables
+
+Go to your GitHub repository → Settings → Secrets and variables → Actions → Variables
+
+**Required Variables:**
+
+| Variable Name | Value |
+|--------------|-------|
+| `GCP_REGION` | `us-central1` |
+| `CLOUD_SQL_INSTANCE_NAME` | `cartiq-db` |
+| `DB_NAME` | `cartiq` |
+| `DB_USER` | `cartiq-user` |
+| `CORS_ALLOWED_ORIGINS` | `https://your-frontend.web.app` |
+| `ADMIN_EMAIL` | `admin@cartiq.com` |
+
+**Optional Variables (for RAG):**
+
+| Variable Name | Value |
+|--------------|-------|
+| `VECTOR_SEARCH_INDEX_ENDPOINT` | Your Vector Search endpoint |
+| `VECTOR_SEARCH_DEPLOYED_INDEX_ID` | Your deployed index ID |
+| `REDIS_HOST` | Redis instance IP |
+| `REDIS_PORT` | `6379` |
+
+### Step 4: Create GCP Secrets
+
+Ensure these secrets exist in GCP Secret Manager (see Step 1 in manual deployment):
+
+```bash
+# Required secrets
+gcloud secrets create jwt-secret --data-file=-
+gcloud secrets create db-password --data-file=-
+gcloud secrets create confluent-api-key --data-file=-
+gcloud secrets create confluent-api-secret --data-file=-
+gcloud secrets create admin-password --data-file=-
+```
+
+### Step 5: Trigger Deployment
+
+Deployments are triggered automatically on push to `main` branch, or manually via:
+
+1. Go to Actions tab in GitHub
+2. Select "Deploy to Cloud Run" workflow
+3. Click "Run workflow"
+
+---
+
 ## Post-Deployment
 
 ### After First Deployment
