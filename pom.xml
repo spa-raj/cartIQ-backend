@@ -36,6 +36,7 @@
         <java.version>17</java.version>
         <spring-kafka.version>4.0.0</spring-kafka.version>
         <google-genai.version>1.28.0</google-genai.version>
+        <google-auth.version>1.31.0</google-auth.version>
         <jjwt.version>0.13.0</jjwt.version>
     </properties>
 
@@ -88,6 +89,18 @@
                 <groupId>com.google.genai</groupId>
                 <artifactId>google-genai</artifactId>
                 <version>${google-genai.version}</version>
+            </dependency>
+
+            <!-- Google Auth Library - version managed to fix CredentialTypeForMetrics issue -->
+            <dependency>
+                <groupId>com.google.auth</groupId>
+                <artifactId>google-auth-library-credentials</artifactId>
+                <version>${google-auth.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.auth</groupId>
+                <artifactId>google-auth-library-oauth2-http</artifactId>
+                <version>${google-auth.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
