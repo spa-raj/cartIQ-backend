@@ -2,8 +2,7 @@
 # Multi-stage build for modular monolith
 
 # Stage 1: Build
-# Pin to specific version for reproducibility
-FROM eclipse-temurin:17.0.13_11-jdk-alpine AS builder
+FROM eclipse-temurin:17-jdk-alpine AS builder
 
 WORKDIR /app
 
@@ -37,9 +36,8 @@ COPY cartiq-app/src cartiq-app/src
 # Build only cartiq-app and its dependencies (excludes seeder, rag)
 RUN mvn clean package -pl cartiq-app -am -DskipTests -B
 
-# Stage 2: Production
-# Pin to specific version, JRE only (smaller attack surface)
-FROM eclipse-temurin:17.0.13_11-jre-alpine
+# Stage 2: Production (JRE only - smaller attack surface)
+FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
