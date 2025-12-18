@@ -143,8 +143,9 @@ public class ProductIndexingService {
     }
 
     // Rate limiting with exponential backoff
-    private long currentDelayMs = 100; // Start with 100ms delay
-    private static final long MIN_DELAY_MS = 100;
+    // Vertex AI embedding quota is limited - start conservatively at 1 request/second
+    private long currentDelayMs = 1000; // Start with 1 second delay
+    private static final long MIN_DELAY_MS = 500; // Never go below 500ms (2 req/sec max)
     private static final long MAX_DELAY_MS = 60000; // Max 1 minute
 
     /**
