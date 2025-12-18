@@ -161,6 +161,15 @@ public class ProductIndexingService {
                 if (datapoint != null) {
                     datapoints.add(datapoint);
                 }
+
+                // Rate limiting: delay between embedding API calls to avoid quota limits
+                // Vertex AI default quota is ~60 requests/minute for embeddings
+                Thread.sleep(1100); // ~55 requests per minute
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Indexing interrupted");
+                break;
             } catch (Exception e) {
                 log.warn("Failed to create datapoint for product {}: {}",
                         product.getId(), e.getMessage());
