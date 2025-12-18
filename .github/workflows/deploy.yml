@@ -92,6 +92,8 @@ jobs:
             VECTOR_SEARCH_INDEX_ENDPOINT=${{ secrets.VECTOR_SEARCH_INDEX_ENDPOINT }}
             VECTOR_SEARCH_DEPLOYED_INDEX_ID=${{ secrets.VECTOR_SEARCH_DEPLOYED_INDEX_ID }}
             VECTOR_SEARCH_API_ENDPOINT=${{ secrets.VECTOR_SEARCH_API_ENDPOINT }}
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
+            REDIS_PORT=${{ vars.REDIS_PORT || '6379' }}
           secrets: |
             JWT_SECRET=jwt-secret:latest
             CONFLUENT_API_KEY=confluent-api-key:latest

@@ -6,8 +6,10 @@ import com.google.genai.types.EmbedContentConfig;
 import com.google.genai.types.EmbedContentResponse;
 import com.google.genai.types.ContentEmbedding;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -18,7 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Service for generating text embeddings using Vertex AI's text-embedding-004 model.
- * Supports caching via Redis to reduce API calls and costs.
+ * Supports optional caching via Redis to reduce API calls and costs.
  */
 @Slf4j
 @Service
@@ -26,6 +28,7 @@ public class EmbeddingService {
 
     private final Client client;
     private final RagConfig ragConfig;
+    @Nullable
     private final RedisTemplate<String, Object> redisTemplate;
     private final String embeddingModel;
 
@@ -34,12 +37,18 @@ public class EmbeddingService {
 
     public EmbeddingService(
             RagConfig ragConfig,
-            RedisTemplate<String, Object> redisTemplate,
+            @Autowired(required = false) @Nullable RedisTemplate<String, Object> redisTemplate,
             @Value("${vertex.ai.project-id:}") String projectId,
             @Value("${vertex.ai.location:us-central1}") String location) {
         this.ragConfig = ragConfig;
         this.redisTemplate = redisTemplate;
         this.embeddingModel = ragConfig.getEmbedding().getModel();
+
+        if (redisTemplate == null) {
+            log.warn("Redis not available - embedding caching disabled");
+        } else {
+            log.info("Redis available - embedding caching enabled");
+        }
 
         // Initialize Vertex AI client for embeddings
         Client tempClient = null;
@@ -75,8 +84,8 @@ public class EmbeddingService {
             return List.of();
         }
 
-        // Check cache first
-        if (cacheKey != null) {
+        // Check cache first (only if Redis is available)
+        if (redisTemplate != null && cacheKey != null) {
             String fullCacheKey = EMBEDDING_CACHE_PREFIX + cacheKey;
             @SuppressWarnings("unchecked")
             List<Float> cached = (List<Float>) redisTemplate.opsForValue().get(fullCacheKey);
@@ -99,8 +108,8 @@ public class EmbeddingService {
                 ContentEmbedding contentEmbedding = embeddingsOpt.get().get(0);
                 List<Float> embedding = contentEmbedding.values().orElse(List.of());
 
-                // Cache the result
-                if (cacheKey != null && !embedding.isEmpty()) {
+                // Cache the result (only if Redis is available)
+                if (redisTemplate != null && cacheKey != null && !embedding.isEmpty()) {
                     String fullCacheKey = EMBEDDING_CACHE_PREFIX + cacheKey;
                     Duration ttl = parseDuration(ragConfig.getCache().getProductEmbeddingTtl());
                     redisTemplate.opsForValue().set(fullCacheKey, embedding, ttl);
@@ -132,13 +141,15 @@ public class EmbeddingService {
             return List.of();
         }
 
-        // Check query cache
+        // Check query cache (only if Redis is available)
         String cacheKey = QUERY_CACHE_PREFIX + query.hashCode();
-        @SuppressWarnings("unchecked")
-        List<Float> cached = (List<Float>) redisTemplate.opsForValue().get(cacheKey);
-        if (cached != null) {
-            log.debug("Cache hit for query embedding");
-            return cached;
+        if (redisTemplate != null) {
+            @SuppressWarnings("unchecked")
+            List<Float> cached = (List<Float>) redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                log.debug("Cache hit for query embedding");
+                return cached;
+            }
         }
 
         try {
@@ -153,8 +164,8 @@ public class EmbeddingService {
                 ContentEmbedding contentEmbedding = embeddingsOpt.get().get(0);
                 List<Float> embedding = contentEmbedding.values().orElse(List.of());
 
-                // Cache with shorter TTL for queries
-                if (!embedding.isEmpty()) {
+                // Cache with shorter TTL for queries (only if Redis is available)
+                if (redisTemplate != null && !embedding.isEmpty()) {
                     Duration ttl = parseDuration(ragConfig.getCache().getQueryEmbeddingTtl());
                     redisTemplate.opsForValue().set(cacheKey, embedding, ttl);
                 }
