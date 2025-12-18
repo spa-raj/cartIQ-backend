@@ -73,7 +73,7 @@ jobs:
             --allow-unauthenticated
             --memory=1Gi
             --cpu=1
-            --min-instances=0
+            --min-instances=1
             --max-instances=10
             --port=8080
             --timeout=300
@@ -92,6 +92,8 @@ jobs:
             VECTOR_SEARCH_INDEX_ENDPOINT=${{ secrets.VECTOR_SEARCH_INDEX_ENDPOINT }}
             VECTOR_SEARCH_DEPLOYED_INDEX_ID=${{ secrets.VECTOR_SEARCH_DEPLOYED_INDEX_ID }}
             VECTOR_SEARCH_API_ENDPOINT=${{ secrets.VECTOR_SEARCH_API_ENDPOINT }}
+            VECTOR_SEARCH_INDEX_ID=${{ secrets.VECTOR_SEARCH_INDEX_ID }}
+            RAG_ENABLED=true
             REDIS_HOST=${{ secrets.REDIS_HOST }}
             REDIS_PORT=${{ vars.REDIS_PORT || '6379' }}
           secrets: |

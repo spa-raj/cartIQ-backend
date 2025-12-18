@@ -7,6 +7,7 @@ import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoCon
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.data.web.config.EnableSpringDataWebSupport;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import static org.springframework.data.web.config.EnableSpringDataWebSupport.PageSerializationMode.VIA_DTO;
@@ -18,6 +19,7 @@ import static org.springframework.data.web.config.EnableSpringDataWebSupport.Pag
 @EntityScan("com.cartiq")
 @EnableJpaRepositories("com.cartiq")
 @EnableJpaAuditing
+@EnableAsync
 @EnableScheduling
 @EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO)
 public class CartiqApplication {

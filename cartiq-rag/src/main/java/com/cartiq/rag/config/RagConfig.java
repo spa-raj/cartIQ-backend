@@ -34,10 +34,12 @@ public class RagConfig {
     public static class VectorSearch {
         /** Vertex AI Vector Search index endpoint (full resource name) */
         private String indexEndpoint;
-        /** Deployed index ID within the endpoint */
+        /** Deployed index ID within the endpoint (for querying) */
         private String deployedIndexId;
-        /** API endpoint for Vector Search (e.g., us-central1-aiplatform.googleapis.com) */
+        /** API endpoint for Vector Search queries (public endpoint, e.g., 123456.us-central1-xxx.vdb.vertexai.goog:10000) */
         private String apiEndpoint;
+        /** Index ID for upserting datapoints (different from deployed index ID) */
+        private String indexId;
     }
 
     @Data

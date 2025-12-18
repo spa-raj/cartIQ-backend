@@ -53,18 +53,21 @@ public class ProductIndexingService {
     }
 
     private void initializeClient() {
-        String apiEndpoint = ragConfig.getVectorSearch().getApiEndpoint();
-        if (apiEndpoint == null || apiEndpoint.isBlank()) {
-            log.warn("Vector Search API endpoint not configured for indexing");
+        // IndexServiceClient needs the regional Vertex AI API endpoint, NOT the public index endpoint
+        // Format: {location}-aiplatform.googleapis.com (e.g., us-central1-aiplatform.googleapis.com)
+        String regionalEndpoint = location + "-aiplatform.googleapis.com:443";
+
+        if (projectId == null || projectId.isBlank()) {
+            log.warn("Project ID not configured for indexing");
             return;
         }
 
         try {
             IndexServiceSettings settings = IndexServiceSettings.newBuilder()
-                    .setEndpoint(apiEndpoint)
+                    .setEndpoint(regionalEndpoint)
                     .build();
             this.indexServiceClient = IndexServiceClient.create(settings);
-            log.info("Initialized Index Service client for product indexing");
+            log.info("Initialized Index Service client for product indexing with endpoint: {}", regionalEndpoint);
         } catch (IOException e) {
             log.error("Failed to initialize Index Service client: {}", e.getMessage());
         }
@@ -369,25 +372,20 @@ public class ProductIndexingService {
      * Format: projects/{project}/locations/{location}/indexes/{index_id}
      */
     private String getIndexResourceName() {
-        String indexEndpoint = ragConfig.getVectorSearch().getIndexEndpoint();
-        if (indexEndpoint == null || indexEndpoint.isBlank()) {
+        String indexId = ragConfig.getVectorSearch().getIndexId();
+
+        if (indexId == null || indexId.isBlank()) {
+            log.warn("Index ID not configured. Set cartiq.rag.vectorsearch.index-id");
             return null;
         }
 
-        // If it's already a full resource name, extract index ID
-        // Index endpoint format: projects/{project}/locations/{location}/indexEndpoints/{endpoint_id}
-        // We need the index resource name, which is different
-
-        // For now, construct from config - you may need to add a separate index ID config
-        if (projectId != null && !projectId.isBlank()) {
-            String deployedIndexId = ragConfig.getVectorSearch().getDeployedIndexId();
-            if (deployedIndexId != null) {
-                return String.format("projects/%s/locations/%s/indexes/%s",
-                        projectId, location, deployedIndexId);
-            }
+        if (projectId == null || projectId.isBlank()) {
+            log.warn("Project ID not configured");
+            return null;
         }
 
-        return null;
+        return String.format("projects/%s/locations/%s/indexes/%s",
+                projectId, location, indexId);
     }
 
     /**
