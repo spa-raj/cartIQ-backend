@@ -1,0 +1,115 @@
+name: Index Products to Vector Search
+
+on:
+  workflow_dispatch:
+    inputs:
+      full_reindex:
+        description: 'Full reindex (true) or incremental (false)'
+        required: true
+        default: 'true'
+        type: boolean
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  SERVICE_NAME: cartiq-backend
+
+jobs:
+  index-products:
+    name: Index Products to Vertex AI Vector Search
+    runs-on: ubuntu-latest
+    environment: prod
+
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Get Cloud Run Service URL
+        id: get-url
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --format='value(status.url)')
+          echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Cloud Run Service URL: $SERVICE_URL"
+
+      - name: Trigger Product Indexing
+        id: index
+        run: |
+          echo "Starting product indexing..."
+          echo "Full Reindex: ${{ inputs.full_reindex }}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/products" \
+            -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Indexing triggered successfully!"
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "Failed to trigger indexing"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Wait for Indexing to Complete
+        if: inputs.full_reindex == true
+        run: |
+          echo "Waiting for indexing to complete..."
+          echo "Note: Full indexing may take several minutes depending on catalog size."
+          echo "Check application logs for detailed progress."
+
+          # Poll the status endpoint for completion
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Checking status (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+
+            STATUS=$(curl -s \
+              "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/status" \
+              -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}")
+
+            echo "Status: $STATUS"
+
+            # Sleep between checks
+            sleep 10
+          done
+
+          echo "Polling complete. Check application logs for final status."
+
+      - name: Summary
+        run: |
+          echo "## Product Indexing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Full Reindex | ${{ inputs.full_reindex }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Service URL | ${{ steps.get-url.outputs.service_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger Status | ${{ steps.index.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check Cloud Run logs for detailed indexing progress." >> $GITHUB_STEP_SUMMARY

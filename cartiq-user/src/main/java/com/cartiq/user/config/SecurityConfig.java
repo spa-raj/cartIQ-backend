@@ -51,15 +51,18 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/events/**").permitAll()
-                        // Chat endpoints require authentication
-                        .requestMatchers("/api/chat/**").authenticated()
+                        // Chat endpoints - public access, user context enriched when authenticated
+                        .requestMatchers("/api/chat/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/products/batch").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         // Health check & actuator
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        // Admin endpoints
+                        // Internal endpoints - protected by Cloud Run IAM, not app JWT
+                        // Only accessible from CI/CD workflows with valid GCP identity token
+                        .requestMatchers("/api/internal/**").permitAll()
+                        // Admin endpoints - protected by app JWT with ADMIN role
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         // All other requests need authentication
                         .anyRequest().authenticated()

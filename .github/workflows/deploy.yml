@@ -97,6 +97,7 @@ jobs:
             CONFLUENT_SR_API_SECRET=confluent-sr-api-secret:latest
             SPRING_DATASOURCE_PASSWORD=db-password:latest
             ADMIN_PASSWORD=admin-password:latest
+            INTERNAL_API_KEY=internal-api-key:latest
 
       - name: Output Service URL
         run: |

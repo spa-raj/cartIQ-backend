@@ -40,6 +40,10 @@
             <groupId>com.cartiq</groupId>
             <artifactId>cartiq-ai</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-rag</artifactId>
+        </dependency>
 
         <!-- .env file support (auto-loads .env on startup) -->
         <dependency>

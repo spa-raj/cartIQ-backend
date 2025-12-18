@@ -32,6 +32,10 @@
             <artifactId>cartiq-product</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.cartiq</groupId>
+            <artifactId>cartiq-rag</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
