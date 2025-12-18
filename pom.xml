@@ -26,8 +26,8 @@
         <module>cartiq-product</module>
         <module>cartiq-order</module>
         <module>cartiq-kafka</module>
-        <module>cartiq-ai</module>
         <module>cartiq-rag</module>
+        <module>cartiq-ai</module>
         <module>cartiq-seeder</module>
         <module>cartiq-app</module>
     </modules>
