@@ -60,9 +60,87 @@ public class ProductService {
                 .map(ProductDTO::fromEntity);
     }
 
+    /**
+     * Search products using PostgreSQL Full-Text Search.
+     * Falls back to LIKE-based search if FTS returns no results.
+     *
+     * @param query Search text
+     * @param pageable Pagination parameters
+     * @return Page of matching products, ranked by relevance
+     */
     @Transactional(readOnly = true)
     public Page<ProductDTO> searchProducts(String query, Pageable pageable) {
-        return productRepository.search(query, pageable)
+        log.debug("Searching products with FTS: query={}", query);
+
+        // Try full-text search first
+        Page<Product> results = productRepository.fullTextSearch(query, pageable);
+
+        // Fall back to LIKE search if FTS returns no results
+        if (results.isEmpty()) {
+            log.debug("FTS returned no results, falling back to LIKE search");
+            results = productRepository.search(query, pageable);
+        }
+
+        return results.map(ProductDTO::fromEntity);
+    }
+
+    /**
+     * Combined search: full-text search with optional price and rating filters.
+     * This is the primary search method for AI-powered queries like
+     * "Show me mobile phones under Rs.20000 with rating above 4".
+     *
+     * Uses PostgreSQL FTS for better relevance ranking (stemming, word boundaries).
+     * Falls back to LIKE-based search if FTS returns no results.
+     *
+     * @param query Text to search in name, description, brand
+     * @param minPrice Minimum price filter (nullable)
+     * @param maxPrice Maximum price filter (nullable)
+     * @param minRating Minimum rating filter (nullable)
+     * @param pageable Pagination parameters
+     * @return Page of matching products
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductDTO> searchWithFilters(String query, BigDecimal minPrice, BigDecimal maxPrice,
+                                              BigDecimal minRating, Pageable pageable) {
+        if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+            throw ProductException.invalidPriceRange();
+        }
+        log.debug("Combined FTS search: query={}, minPrice={}, maxPrice={}, minRating={}",
+                query, minPrice, maxPrice, minRating);
+
+        // Try full-text search with filters first
+        Page<Product> results = productRepository.fullTextSearchWithFilters(
+                query, minPrice, maxPrice, minRating, pageable);
+
+        // Fall back to LIKE search if FTS returns no results
+        if (results.isEmpty()) {
+            log.debug("FTS returned no results, falling back to LIKE search with filters");
+            results = productRepository.searchWithFilters(query, minPrice, maxPrice, minRating, pageable);
+        }
+
+        return results.map(ProductDTO::fromEntity);
+    }
+
+    /**
+     * Search by category with optional price and rating filters.
+     *
+     * @param categoryId Category UUID
+     * @param minPrice Minimum price filter (nullable)
+     * @param maxPrice Maximum price filter (nullable)
+     * @param minRating Minimum rating filter (nullable)
+     * @param pageable Pagination parameters
+     * @return Page of matching products
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductDTO> getProductsByCategoryWithFilters(UUID categoryId, BigDecimal minPrice,
+                                                              BigDecimal maxPrice, BigDecimal minRating,
+                                                              Pageable pageable) {
+        if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+            throw ProductException.invalidPriceRange();
+        }
+        log.debug("Category search with filters: categoryId={}, minPrice={}, maxPrice={}, minRating={}",
+                categoryId, minPrice, maxPrice, minRating);
+        return productRepository.findByCategoryWithFilters(categoryId, minPrice, maxPrice, minRating, pageable)
                 .map(ProductDTO::fromEntity);
     }
 

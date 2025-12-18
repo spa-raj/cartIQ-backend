@@ -1,7 +1,11 @@
 package com.cartiq.kafka.producer;
 
 import com.cartiq.kafka.config.KafkaTopics;
-import com.cartiq.kafka.dto.KafkaEvents.*;
+import com.cartiq.kafka.dto.KafkaEvents.AISearchEvent;
+import com.cartiq.kafka.dto.KafkaEvents.CartEvent;
+import com.cartiq.kafka.dto.KafkaEvents.OrderEvent;
+import com.cartiq.kafka.dto.KafkaEvents.ProductViewEvent;
+import com.cartiq.kafka.dto.KafkaEvents.UserEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -56,6 +60,13 @@ public class EventProducer {
      */
     public void publishOrderEvent(OrderEvent event) {
         send(KafkaTopics.ORDER_EVENTS, event.getUserId(), event);
+    }
+
+    /**
+     * Publish AI search/chat events (tool calls, RAG searches)
+     */
+    public void publishAISearchEvent(AISearchEvent event) {
+        send(KafkaTopics.AI_EVENTS, event.getUserId(), event);
     }
 
     // Note: user-profiles topic is populated by Flink, not by this producer

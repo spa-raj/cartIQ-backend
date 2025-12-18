@@ -34,6 +34,28 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' AND p.featured = true")
     Page<Product> findFeaturedProducts(Pageable pageable);
 
+    /**
+     * Full-text search using PostgreSQL stored tsvector column with GIN index.
+     * Handles stemming (phone→phones), ranking, and word boundaries.
+     * Uses the pre-computed search_vector column for maximum performance.
+     */
+    @Query(value = """
+            SELECT * FROM products p
+            WHERE p.status = 'ACTIVE'
+            AND p.search_vector @@ plainto_tsquery('english', :query)
+            ORDER BY ts_rank(p.search_vector, plainto_tsquery('english', :query)) DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM products p
+            WHERE p.status = 'ACTIVE'
+            AND p.search_vector @@ plainto_tsquery('english', :query)
+            """,
+            nativeQuery = true)
+    Page<Product> fullTextSearch(@Param("query") String query, Pageable pageable);
+
+    /**
+     * Legacy LIKE-based search (fallback when FTS returns no results).
+     */
     @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' AND " +
            "(LOWER(p.name) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(p.description) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
@@ -44,6 +66,64 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     Page<Product> findByPriceRange(@Param("minPrice") BigDecimal minPrice,
                                    @Param("maxPrice") BigDecimal maxPrice,
                                    Pageable pageable);
+
+    /**
+     * Combined full-text search with price and rating filters.
+     * Uses pre-computed search_vector column with GIN index for performance.
+     */
+    @Query(value = """
+            SELECT * FROM products p
+            WHERE p.status = 'ACTIVE'
+            AND p.search_vector @@ plainto_tsquery('english', :query)
+            AND (:minPrice IS NULL OR p.price >= :minPrice)
+            AND (:maxPrice IS NULL OR p.price <= :maxPrice)
+            AND (:minRating IS NULL OR p.rating >= :minRating)
+            ORDER BY ts_rank(p.search_vector, plainto_tsquery('english', :query)) DESC
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM products p
+            WHERE p.status = 'ACTIVE'
+            AND p.search_vector @@ plainto_tsquery('english', :query)
+            AND (:minPrice IS NULL OR p.price >= :minPrice)
+            AND (:maxPrice IS NULL OR p.price <= :maxPrice)
+            AND (:minRating IS NULL OR p.rating >= :minRating)
+            """,
+            nativeQuery = true)
+    Page<Product> fullTextSearchWithFilters(@Param("query") String query,
+                                            @Param("minPrice") BigDecimal minPrice,
+                                            @Param("maxPrice") BigDecimal maxPrice,
+                                            @Param("minRating") BigDecimal minRating,
+                                            Pageable pageable);
+
+    /**
+     * Legacy LIKE-based search with filters (fallback).
+     */
+    @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
+           "AND (LOWER(p.name) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+           "     LOWER(p.description) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
+           "     LOWER(p.brand) LIKE LOWER(CONCAT('%', :query, '%'))) " +
+           "AND (:minPrice IS NULL OR p.price >= :minPrice) " +
+           "AND (:maxPrice IS NULL OR p.price <= :maxPrice) " +
+           "AND (:minRating IS NULL OR p.rating >= :minRating)")
+    Page<Product> searchWithFilters(@Param("query") String query,
+                                    @Param("minPrice") BigDecimal minPrice,
+                                    @Param("maxPrice") BigDecimal maxPrice,
+                                    @Param("minRating") BigDecimal minRating,
+                                    Pageable pageable);
+
+    /**
+     * Search by category with price and rating filters.
+     */
+    @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
+           "AND p.category.id = :categoryId " +
+           "AND (:minPrice IS NULL OR p.price >= :minPrice) " +
+           "AND (:maxPrice IS NULL OR p.price <= :maxPrice) " +
+           "AND (:minRating IS NULL OR p.rating >= :minRating)")
+    Page<Product> findByCategoryWithFilters(@Param("categoryId") UUID categoryId,
+                                            @Param("minPrice") BigDecimal minPrice,
+                                            @Param("maxPrice") BigDecimal maxPrice,
+                                            @Param("minRating") BigDecimal minRating,
+                                            Pageable pageable);
 
     @Query("SELECT DISTINCT p.brand FROM Product p WHERE p.brand IS NOT NULL AND p.status = 'ACTIVE' ORDER BY p.brand")
     List<String> findAllBrands();

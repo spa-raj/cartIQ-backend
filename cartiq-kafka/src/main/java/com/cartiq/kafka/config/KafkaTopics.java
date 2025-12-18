@@ -27,6 +27,9 @@ public final class KafkaTopics {
     /** Order events: placed, completed, cancelled */
     public static final String ORDER_EVENTS = "order-events";
 
+    /** AI chat and search events */
+    public static final String AI_EVENTS = "ai-events";
+
     // ==================== OUTPUT TOPICS ====================
     // These receive aggregated data from Flink
 

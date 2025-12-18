@@ -147,6 +147,31 @@ public class KafkaEvents {
 
     // ==================== AI CHAT EVENTS ====================
 
+    /**
+     * Event emitted when AI uses tools to search/filter products.
+     * Captures user intent from natural language queries.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AISearchEvent {
+        private String eventId;
+        private String userId;
+        private String sessionId;
+        private String query;                   // Original user query
+        private String searchType;              // TOOL_CALL, RAG, HYBRID
+        private String toolName;                // searchProducts, getProductDetails, etc.
+        private String category;                // Category filter used (if any)
+        private Double minPrice;                // Price range filter (if any)
+        private Double maxPrice;
+        private Double minRating;               // Rating filter (if any)
+        private Integer resultsCount;           // Number of products returned
+        private List<String> returnedProductIds;
+        private Long processingTimeMs;
+        private String timestamp;               // ISO-8601 format
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
