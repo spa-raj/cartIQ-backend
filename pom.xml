@@ -36,7 +36,7 @@
         <java.version>17</java.version>
         <spring-kafka.version>4.0.0</spring-kafka.version>
         <google-genai.version>1.32.0</google-genai.version>
-        <google-auth.version>1.31.0</google-auth.version>
+        <google-auth.version>1.39.1</google-auth.version>
         <jjwt.version>0.13.0</jjwt.version>
     </properties>
 

@@ -2,7 +2,6 @@ package com.cartiq.app;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-
 import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
@@ -16,8 +15,8 @@ import static org.springframework.data.web.config.EnableSpringDataWebSupport.Pag
         scanBasePackages = "com.cartiq",
         exclude = {UserDetailsServiceAutoConfiguration.class}
 )
-@EntityScan(basePackages = "com.cartiq")
-@EnableJpaRepositories(basePackages = "com.cartiq")
+@EntityScan("com.cartiq")
+@EnableJpaRepositories("com.cartiq")
 @EnableJpaAuditing
 @EnableScheduling
 @EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO)
