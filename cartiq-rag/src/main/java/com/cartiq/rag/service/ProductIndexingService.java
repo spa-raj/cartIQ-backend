@@ -142,6 +142,11 @@ public class ProductIndexingService {
         return totalIndexed.get();
     }
 
+    // Rate limiting with exponential backoff
+    private long currentDelayMs = 100; // Start with 100ms delay
+    private static final long MIN_DELAY_MS = 100;
+    private static final long MAX_DELAY_MS = 60000; // Max 1 minute
+
     /**
      * Index a batch of products.
      *
@@ -157,14 +162,15 @@ public class ProductIndexingService {
 
         for (ProductDTO product : products) {
             try {
-                IndexDatapoint datapoint = createDatapoint(product);
+                IndexDatapoint datapoint = createDatapointWithRetry(product);
                 if (datapoint != null) {
                     datapoints.add(datapoint);
+                    // Success - gradually reduce delay (but not below minimum)
+                    currentDelayMs = Math.max(MIN_DELAY_MS, currentDelayMs / 2);
                 }
 
-                // Rate limiting: delay between embedding API calls to avoid quota limits
-                // Vertex AI default quota is ~60 requests/minute for embeddings
-                Thread.sleep(1100); // ~55 requests per minute
+                // Small delay between requests
+                Thread.sleep(currentDelayMs);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -181,6 +187,35 @@ public class ProductIndexingService {
         }
 
         return upsertDatapoints(datapoints);
+    }
+
+    /**
+     * Create datapoint with retry and exponential backoff on rate limit errors.
+     */
+    private IndexDatapoint createDatapointWithRetry(ProductDTO product) {
+        int maxRetries = 5;
+        for (int attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                return createDatapoint(product);
+            } catch (EmbeddingService.RateLimitException e) {
+                // Rate limited - exponential backoff
+                currentDelayMs = Math.min(MAX_DELAY_MS, currentDelayMs * 2);
+                log.warn("Rate limited, backing off to {}ms (attempt {}/{})",
+                        currentDelayMs, attempt + 1, maxRetries);
+                try {
+                    Thread.sleep(currentDelayMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            } catch (Exception e) {
+                // Other error - don't retry
+                log.warn("Error creating datapoint for product {}: {}", product.getId(), e.getMessage());
+                return null;
+            }
+        }
+        log.warn("Max retries exceeded for product {}", product.getId());
+        return null;
     }
 
     /**

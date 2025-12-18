@@ -123,8 +123,22 @@ public class EmbeddingService {
             return List.of();
 
         } catch (Exception e) {
-            log.error("Error generating embedding: {}", e.getMessage());
+            String message = e.getMessage();
+            log.error("Error generating embedding: {}", message);
+            // Propagate rate limit errors for upstream retry handling
+            if (message != null && message.contains("429")) {
+                throw new RateLimitException("Embedding API rate limited: " + message);
+            }
             return List.of();
+        }
+    }
+
+    /**
+     * Exception for rate limit errors that should be retried.
+     */
+    public static class RateLimitException extends RuntimeException {
+        public RateLimitException(String message) {
+            super(message);
         }
     }
 
