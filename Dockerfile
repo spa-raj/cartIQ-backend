@@ -31,10 +31,11 @@ COPY cartiq-user/src cartiq-user/src
 COPY cartiq-product/src cartiq-product/src
 COPY cartiq-order/src cartiq-order/src
 COPY cartiq-kafka/src cartiq-kafka/src
+COPY cartiq-rag/src cartiq-rag/src
 COPY cartiq-ai/src cartiq-ai/src
 COPY cartiq-app/src cartiq-app/src
 
-# Build only cartiq-app and its dependencies (excludes seeder, rag)
+# Build only cartiq-app and its dependencies (excludes seeder)
 RUN mvn clean package -pl cartiq-app -am -DskipTests -B
 
 # Stage 2: Production (Google Distroless - minimal and secure)
