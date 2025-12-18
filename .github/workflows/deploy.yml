@@ -89,6 +89,9 @@ jobs:
             CONFLUENT_SCHEMA_REGISTRY_URL=${{ secrets.CONFLUENT_SCHEMA_REGISTRY_URL }}
             ADMIN_EMAIL=${{ vars.ADMIN_EMAIL }}
             CORS_ALLOWED_ORIGINS=${{ vars.CORS_ALLOWED_ORIGINS }}
+            VECTOR_SEARCH_INDEX_ENDPOINT=${{ secrets.VECTOR_SEARCH_INDEX_ENDPOINT }}
+            VECTOR_SEARCH_DEPLOYED_INDEX_ID=${{ secrets.VECTOR_SEARCH_DEPLOYED_INDEX_ID }}
+            VECTOR_SEARCH_API_ENDPOINT=${{ secrets.VECTOR_SEARCH_API_ENDPOINT }}
           secrets: |
             JWT_SECRET=jwt-secret:latest
             CONFLUENT_API_KEY=confluent-api-key:latest
