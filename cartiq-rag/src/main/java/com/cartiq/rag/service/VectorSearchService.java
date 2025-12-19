@@ -210,7 +210,9 @@ public class VectorSearchService {
             // Refresh credentials and get access token
             credentials.refreshIfExpired();
             String accessToken = credentials.getAccessToken().getTokenValue();
-            log.debug("Using access token (length={})", accessToken != null ? accessToken.length() : "null");
+            log.debug("Using access token (length={}, prefix={})",
+                    accessToken != null ? accessToken.length() : "null",
+                    accessToken != null && accessToken.length() > 10 ? accessToken.substring(0, 10) + "..." : "null");
 
             // Set headers
             HttpHeaders headers = new HttpHeaders();
@@ -218,16 +220,18 @@ public class VectorSearchService {
             headers.setBearerAuth(accessToken);
 
             String requestJson = objectMapper.writeValueAsString(requestBody);
-            HttpEntity<String> entity = new HttpEntity<>(requestJson, headers);
 
-            // Log request structure (without full vector for brevity)
+            // Log request structure for debugging
             log.debug("Vector Search request to {}: deployed_index_id={}, embedding_size={}, first_3_values=[{},{},{}]",
                     restEndpointUrl, deployedIndexId, embedding.size(),
                     embedding.size() > 0 ? embedding.get(0) : "N/A",
                     embedding.size() > 1 ? embedding.get(1) : "N/A",
                     embedding.size() > 2 ? embedding.get(2) : "N/A");
-            log.trace("Full request JSON (first 500 chars): {}",
-                    requestJson.length() > 500 ? requestJson.substring(0, 500) + "..." : requestJson);
+
+            // Log JSON structure (first 300 chars to verify format)
+            log.debug("Request JSON structure: {}", requestJson.substring(0, Math.min(300, requestJson.length())));
+
+            HttpEntity<String> entity = new HttpEntity<>(requestJson, headers);
 
             // Execute request
             long startTime = System.currentTimeMillis();
@@ -239,10 +243,12 @@ public class VectorSearchService {
             );
             long searchTime = System.currentTimeMillis() - startTime;
 
-            log.debug("Vector search REST API completed in {}ms, status={}", searchTime, response.getStatusCode());
+            String responseBody = response.getBody();
+            log.debug("Vector search REST API completed in {}ms, status={}, responseLength={}",
+                    searchTime, response.getStatusCode(), responseBody != null ? responseBody.length() : 0);
 
             // Parse response
-            return parseResponse(response.getBody(), searchTime);
+            return parseResponse(responseBody, searchTime);
 
         } catch (Exception e) {
             log.error("Error executing vector search: {}", e.getMessage(), e);
