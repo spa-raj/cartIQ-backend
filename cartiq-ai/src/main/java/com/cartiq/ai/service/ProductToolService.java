@@ -5,6 +5,7 @@ import com.cartiq.product.dto.ProductDTO;
 import com.cartiq.product.service.CategoryService;
 import com.cartiq.product.service.ProductService;
 import com.cartiq.rag.dto.SearchResult;
+import com.cartiq.rag.service.RerankerService;
 import com.cartiq.rag.service.VectorSearchService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,9 +32,11 @@ public class ProductToolService {
     private final ProductService productService;
     private final CategoryService categoryService;
     private final VectorSearchService vectorSearchService;
+    private final RerankerService rerankerService;
 
     private static final int DEFAULT_PAGE_SIZE = 10;
     private static final int VECTOR_SEARCH_CANDIDATES = 50;
+    private static final int HYBRID_CANDIDATES = 30; // Candidates from each source for hybrid search
 
     /**
      * Search products with filters. Called by Gemini for queries like:
@@ -65,9 +68,11 @@ public class ProductToolService {
     /**
      * Instance method that performs the actual search.
      *
-     * Uses HYBRID search strategy:
-     * 1. If vector search is available → semantic search + metadata filters
-     * 2. Fallback to PostgreSQL FTS + filters
+     * Uses HYBRID search strategy with Cross-Encoder Reranking:
+     * 1. Run Vector Search (semantic) → get candidates
+     * 2. Run PostgreSQL FTS (keyword) → get candidates
+     * 3. Combine and deduplicate candidates
+     * 4. Use Cross-Encoder Reranker to select top-N most relevant results
      */
     public List<ProductDTO> executeSearchProducts(
             String query,
@@ -79,18 +84,111 @@ public class ProductToolService {
         log.info("Executing searchProducts: query={}, category={}, minPrice={}, maxPrice={}, minRating={}",
                 query, category, minPrice, maxPrice, minRating);
 
-        // Try vector search first for semantic queries
-        if (query != null && !query.isBlank() && vectorSearchService.isAvailable()) {
-            List<ProductDTO> vectorResults = executeVectorSearch(query, category, minPrice, maxPrice, minRating);
-            if (!vectorResults.isEmpty()) {
-                log.info("Vector search returned {} products", vectorResults.size());
-                return vectorResults;
-            }
-            log.debug("Vector search returned no results, falling back to FTS");
+        // If no query, just use FTS/category search
+        if (query == null || query.isBlank()) {
+            return executeFtsSearch(query, category, minPrice, maxPrice, minRating);
         }
 
-        // Fallback to PostgreSQL FTS/LIKE search
-        return executeFtsSearch(query, category, minPrice, maxPrice, minRating);
+        // HYBRID SEARCH: Run both Vector Search and FTS
+        List<ProductDTO> vectorResults = List.of();
+        List<ProductDTO> ftsResults = List.of();
+
+        // 1. Vector Search (semantic)
+        if (vectorSearchService.isAvailable()) {
+            vectorResults = executeVectorSearch(query, category, minPrice, maxPrice, minRating);
+            log.debug("Vector search returned {} candidates", vectorResults.size());
+        }
+
+        // 2. FTS Search (keyword)
+        ftsResults = executeFtsSearchWithLimit(query, category, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
+        log.debug("FTS search returned {} candidates", ftsResults.size());
+
+        // 3. Combine and deduplicate
+        Map<UUID, ProductDTO> combinedMap = new LinkedHashMap<>();
+
+        // Add vector results first (they have semantic relevance)
+        for (ProductDTO product : vectorResults) {
+            combinedMap.put(product.getId(), product);
+        }
+
+        // Add FTS results (keyword matches)
+        for (ProductDTO product : ftsResults) {
+            combinedMap.putIfAbsent(product.getId(), product);
+        }
+
+        List<ProductDTO> combinedResults = new ArrayList<>(combinedMap.values());
+        log.info("Hybrid search: {} vector + {} FTS = {} unique candidates",
+                vectorResults.size(), ftsResults.size(), combinedResults.size());
+
+        // If no results at all, return empty
+        if (combinedResults.isEmpty()) {
+            return List.of();
+        }
+
+        // If only a few results or reranker not available, return as-is
+        if (combinedResults.size() <= DEFAULT_PAGE_SIZE || !rerankerService.isAvailable()) {
+            return combinedResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, combinedResults.size()));
+        }
+
+        // 4. Rerank using Cross-Encoder
+        return rerankResults(query, combinedResults);
+    }
+
+    /**
+     * Rerank combined results using Cross-Encoder model.
+     */
+    private List<ProductDTO> rerankResults(String query, List<ProductDTO> candidates) {
+        try {
+            // Prepare documents for reranking
+            List<String> documents = candidates.stream()
+                    .map(this::buildProductDescription)
+                    .toList();
+
+            List<String> documentIds = candidates.stream()
+                    .map(p -> p.getId().toString())
+                    .toList();
+
+            // Call reranker
+            List<String> rerankedIds = rerankerService.rerank(query, documents, documentIds, DEFAULT_PAGE_SIZE);
+
+            // Map back to products in reranked order
+            Map<UUID, ProductDTO> productMap = candidates.stream()
+                    .collect(Collectors.toMap(ProductDTO::getId, p -> p));
+
+            List<ProductDTO> rerankedProducts = rerankedIds.stream()
+                    .map(id -> productMap.get(UUID.fromString(id)))
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            log.info("Reranker returned {} products from {} candidates", rerankedProducts.size(), candidates.size());
+            return rerankedProducts;
+
+        } catch (Exception e) {
+            log.warn("Reranking failed, returning original order: {}", e.getMessage());
+            return candidates.subList(0, Math.min(DEFAULT_PAGE_SIZE, candidates.size()));
+        }
+    }
+
+    /**
+     * Build a product description for reranking.
+     */
+    private String buildProductDescription(ProductDTO product) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(product.getName());
+        if (product.getBrand() != null) {
+            sb.append(" by ").append(product.getBrand());
+        }
+        if (product.getCategoryName() != null) {
+            sb.append(". Category: ").append(product.getCategoryName());
+        }
+        if (product.getDescription() != null) {
+            String desc = product.getDescription();
+            if (desc.length() > 200) {
+                desc = desc.substring(0, 200) + "...";
+            }
+            sb.append(". ").append(desc);
+        }
+        return sb.toString();
     }
 
     /**
@@ -157,6 +255,41 @@ public class ProductToolService {
                 .map(productMap::get)
                 .filter(Objects::nonNull)
                 .toList();
+    }
+
+    /**
+     * Full-text search using PostgreSQL with custom limit.
+     */
+    private List<ProductDTO> executeFtsSearchWithLimit(
+            String query,
+            String category,
+            Double minPrice,
+            Double maxPrice,
+            Double minRating,
+            int limit) {
+
+        Pageable pageable = PageRequest.of(0, limit);
+        Page<ProductDTO> results;
+
+        BigDecimal minPriceBD = minPrice != null ? BigDecimal.valueOf(minPrice) : null;
+        BigDecimal maxPriceBD = maxPrice != null ? BigDecimal.valueOf(maxPrice) : null;
+        BigDecimal minRatingBD = minRating != null ? BigDecimal.valueOf(minRating) : null;
+
+        if (query != null && !query.isBlank()) {
+            results = productService.searchWithFilters(query, minPriceBD, maxPriceBD, minRatingBD, pageable);
+        } else if (category != null && !category.isBlank()) {
+            UUID categoryId = findCategoryIdByName(category);
+            if (categoryId != null) {
+                results = productService.getProductsByCategoryWithFilters(
+                        categoryId, minPriceBD, maxPriceBD, minRatingBD, pageable);
+            } else {
+                results = productService.searchWithFilters(category, minPriceBD, maxPriceBD, minRatingBD, pageable);
+            }
+        } else {
+            results = productService.getFeaturedProducts(pageable);
+        }
+
+        return results.getContent();
     }
 
     /**
