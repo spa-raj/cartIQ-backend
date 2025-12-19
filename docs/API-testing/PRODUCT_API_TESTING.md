@@ -35,7 +35,7 @@ curl -X POST http://localhost:8082/api/auth/login \
 
 Save the `accessToken` from the response for authenticated requests.
 
-See [Creating an Admin User](./USER_API_TESTING.md#creating-an-admin-user) for setup instructions.
+See [Creating an Admin User](USER_API_TESTING.md#creating-an-admin-user) for setup instructions.
 
 ---
 
@@ -1127,6 +1127,6 @@ After testing Product APIs, you can test:
 
 ## Related Documentation
 
-- [User API Testing Guide](./USER_API_TESTING.md)
-- [Architecture Overview](./ARCHITECTURE.md)
-- [Deployment Guide](./DEPLOYMENT.md)
+- [User API Testing Guide](USER_API_TESTING.md)
+- [Architecture Overview](../ARCHITECTURE.md)
+- [Deployment Guide](../DEPLOYMENT.md)

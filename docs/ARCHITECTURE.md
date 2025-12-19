@@ -309,9 +309,10 @@ return ragPipeline.retrieve(query, userContext);
 - [GCP Setup Guide](./GCP_SETUP.md)
 - [Deployment Guide](./DEPLOYMENT.md)
 - [Demo Script](./demo.md)
-- [Product API Testing](./PRODUCT_API_TESTING.md)
-- [User API Testing](./USER_API_TESTING.md)
-- [Order API Testing](./ORDER_API_TESTING.md)
+- [Product API Testing](./API-testing/PRODUCT_API_TESTING.md)
+- [User API Testing](./API-testing/USER_API_TESTING.md)
+- [Order API Testing](./API-testing/ORDER_API_TESTING.md)
+- [Chat API Testing](./API-testing/CHAT_API_TESTING.md)
 
 ---
 

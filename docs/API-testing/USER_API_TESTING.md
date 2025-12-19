@@ -765,7 +765,7 @@ To test admin-only endpoints like `GET /api/users/{userId}`, you need an admin u
 ADMIN_EMAIL=admin@cartiq.com ADMIN_PASSWORD=Admin123! mvn spring-boot:run -pl cartiq-app
 ```
 
-**Production:** See [DEPLOYMENT.md](./DEPLOYMENT.md) for GCP Cloud Run setup with Secret Manager.
+**Production:** See [DEPLOYMENT.md](../DEPLOYMENT.md) for GCP Cloud Run setup with Secret Manager.
 
 ### Option 2: Register Endpoint (Additional Admins)
 
@@ -830,4 +830,4 @@ After testing User APIs, you can test:
 
 ## Related Documentation
 
-- [Deployment Guide](./DEPLOYMENT.md) - GCP Cloud Run deployment and admin setup
+- [Deployment Guide](../DEPLOYMENT.md) - GCP Cloud Run deployment and admin setup

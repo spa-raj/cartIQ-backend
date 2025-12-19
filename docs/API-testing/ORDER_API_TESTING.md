@@ -35,7 +35,7 @@ curl -X POST http://localhost:8082/api/auth/login \
 
 Save the `accessToken` from the response for authenticated requests.
 
-See [User API Testing Guide](./USER_API_TESTING.md) for registration and login details.
+See [User API Testing Guide](USER_API_TESTING.md) for registration and login details.
 
 ---
 
@@ -1128,7 +1128,7 @@ All paginated endpoints support:
 
 ## Related Documentation
 
-- [User API Testing Guide](./USER_API_TESTING.md)
-- [Product API Testing Guide](./PRODUCT_API_TESTING.md)
-- [Architecture Overview](./ARCHITECTURE.md)
-- [Deployment Guide](./DEPLOYMENT.md)
+- [User API Testing Guide](USER_API_TESTING.md)
+- [Product API Testing Guide](PRODUCT_API_TESTING.md)
+- [Architecture Overview](../ARCHITECTURE.md)
+- [Deployment Guide](../DEPLOYMENT.md)

@@ -200,9 +200,10 @@ cartiq-backend/
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Deployment Guide](./docs/DEPLOYMENT.md)
 - [GCP Setup](./docs/GCP_SETUP.md)
-- [User API Testing](./docs/USER_API_TESTING.md)
-- [Product API Testing](./docs/PRODUCT_API_TESTING.md)
-- [Order API Testing](./docs/ORDER_API_TESTING.md)
+- [User API Testing](./docs/API-testing/USER_API_TESTING.md)
+- [Product API Testing](./docs/API-testing/PRODUCT_API_TESTING.md)
+- [Order API Testing](./docs/API-testing/ORDER_API_TESTING.md)
+- [Chat API Testing](./docs/API-testing/CHAT_API_TESTING.md)
 
 ---
 
