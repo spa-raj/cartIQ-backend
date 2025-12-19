@@ -301,8 +301,8 @@ public class GeminiService {
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
 
-                    // Emit Kafka event
-                    emitAISearchEvent(userId, sessionId, originalQuery, functionName,
+                    // Emit Kafka event - searchProducts uses HYBRID (Vector + FTS + Reranker)
+                    emitAISearchEvent(userId, sessionId, originalQuery, functionName, "HYBRID",
                             category, minPrice, maxPrice, minRating, products, startTime);
                 }
 
@@ -318,7 +318,8 @@ public class GeminiService {
                         responseData.put("error", "Product not found");
                     }
 
-                    emitAISearchEvent(userId, sessionId, originalQuery, functionName,
+                    // FTS - database lookup
+                    emitAISearchEvent(userId, sessionId, originalQuery, functionName, "FTS",
                             null, null, null, null, products, startTime);
                 }
 
@@ -335,7 +336,8 @@ public class GeminiService {
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
 
-                    emitAISearchEvent(userId, sessionId, originalQuery, functionName,
+                    // FTS - database query
+                    emitAISearchEvent(userId, sessionId, originalQuery, functionName, "FTS",
                             null, null, null, null, products, startTime);
                 }
 
@@ -346,7 +348,8 @@ public class GeminiService {
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
 
-                    emitAISearchEvent(userId, sessionId, originalQuery, functionName,
+                    // FTS - database lookups
+                    emitAISearchEvent(userId, sessionId, originalQuery, functionName, "FTS",
                             null, null, null, null, products, startTime);
                 }
 
@@ -356,7 +359,8 @@ public class GeminiService {
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
 
-                    emitAISearchEvent(userId, sessionId, originalQuery, functionName,
+                    // FTS - database query by brand
+                    emitAISearchEvent(userId, sessionId, originalQuery, functionName, "FTS",
                             null, null, null, null, products, startTime);
                 }
 
@@ -546,6 +550,7 @@ public class GeminiService {
             String sessionId,
             String originalQuery,
             String toolName,
+            String searchType,
             String category,
             Double minPrice,
             Double maxPrice,
@@ -560,7 +565,7 @@ public class GeminiService {
                     .userId(userId != null ? userId : "anonymous")
                     .sessionId(sessionId != null ? sessionId : "")
                     .query(originalQuery != null ? originalQuery : "")
-                    .searchType("TOOL_CALL")
+                    .searchType(searchType != null ? searchType : "UNKNOWN")
                     .toolName(toolName != null ? toolName : "")
                     .category(category != null ? category : "")
                     .minPrice(minPrice != null ? minPrice : 0.0)
