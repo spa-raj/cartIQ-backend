@@ -96,8 +96,11 @@ public class VectorSearchService {
 
         try {
             List<Float> queryEmbedding = embeddingService.embedQuery(query);
-            log.debug("Generated query embedding with {} dimensions for query: {}",
-                    queryEmbedding.size(), query.length() > 50 ? query.substring(0, 50) + "..." : query);
+            log.debug("Generated query embedding with {} dimensions for query: {}, first values: [{}, {}, {}]",
+                    queryEmbedding.size(), query.length() > 50 ? query.substring(0, 50) + "..." : query,
+                    queryEmbedding.size() > 0 ? queryEmbedding.get(0) : "N/A",
+                    queryEmbedding.size() > 1 ? queryEmbedding.get(1) : "N/A",
+                    queryEmbedding.size() > 2 ? queryEmbedding.get(2) : "N/A");
             if (queryEmbedding.isEmpty()) {
                 log.warn("Failed to generate query embedding");
                 return List.of();
@@ -207,6 +210,7 @@ public class VectorSearchService {
             // Refresh credentials and get access token
             credentials.refreshIfExpired();
             String accessToken = credentials.getAccessToken().getTokenValue();
+            log.debug("Using access token (length={})", accessToken != null ? accessToken.length() : "null");
 
             // Set headers
             HttpHeaders headers = new HttpHeaders();
@@ -216,8 +220,14 @@ public class VectorSearchService {
             String requestJson = objectMapper.writeValueAsString(requestBody);
             HttpEntity<String> entity = new HttpEntity<>(requestJson, headers);
 
-            log.debug("Vector Search request to {}: deployed_index_id={}, embedding_size={}",
-                    restEndpointUrl, deployedIndexId, embedding.size());
+            // Log request structure (without full vector for brevity)
+            log.debug("Vector Search request to {}: deployed_index_id={}, embedding_size={}, first_3_values=[{},{},{}]",
+                    restEndpointUrl, deployedIndexId, embedding.size(),
+                    embedding.size() > 0 ? embedding.get(0) : "N/A",
+                    embedding.size() > 1 ? embedding.get(1) : "N/A",
+                    embedding.size() > 2 ? embedding.get(2) : "N/A");
+            log.trace("Full request JSON (first 500 chars): {}",
+                    requestJson.length() > 500 ? requestJson.substring(0, 500) + "..." : requestJson);
 
             // Execute request
             long startTime = System.currentTimeMillis();
@@ -229,7 +239,7 @@ public class VectorSearchService {
             );
             long searchTime = System.currentTimeMillis() - startTime;
 
-            log.debug("Vector search REST API completed in {}ms", searchTime);
+            log.debug("Vector search REST API completed in {}ms, status={}", searchTime, response.getStatusCode());
 
             // Parse response
             return parseResponse(response.getBody(), searchTime);
