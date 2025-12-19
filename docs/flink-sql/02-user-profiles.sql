@@ -10,9 +10,11 @@
 --   - product_views_timed (view with parsed timestamp)
 --   - cart_events_timed (view with parsed timestamp)
 --   - user_events_timed (view with parsed timestamp)
+--   - ai_events_timed (view with parsed timestamp)
 --   - recent_product_activity (aggregated product views)
 --   - cart_activity (aggregated cart events)
 --   - session_activity (aggregated session events)
+--   - ai_search_activity (aggregated AI chat interactions)
 -- ============================================================================
 
 -- ============================================================================
@@ -38,6 +40,14 @@ CREATE TABLE `user-profiles` (
     currentCartItems     BIGINT NOT NULL,
     sessionDurationMs    BIGINT NOT NULL,
     deviceType           STRING NOT NULL,
+    -- AI Search Activity (strong intent signals from chat)
+    aiSearchCount        BIGINT NOT NULL,
+    aiSearchQueries      ARRAY<STRING NOT NULL> NOT NULL,
+    aiSearchCategories   ARRAY<STRING NOT NULL> NOT NULL,
+    aiMaxBudget          DOUBLE NOT NULL,
+    aiProductSearches    BIGINT NOT NULL,
+    aiProductComparisons BIGINT NOT NULL,
+    -- Window timestamps
     windowStart          STRING NOT NULL,
     windowEnd            STRING NOT NULL,
     lastUpdated          STRING NOT NULL,
@@ -81,8 +91,11 @@ SELECT
     p.avgViewDurationMs,
     p.avgProductPrice,
 
-    -- Price preference
+    -- Price preference (combine browsing + AI search signals)
     CASE
+        WHEN COALESCE(a.aiMaxBudget, 0.0) > 0 AND COALESCE(a.aiMaxBudget, 0.0) < 500 THEN 'BUDGET'
+        WHEN COALESCE(a.aiMaxBudget, 0.0) > 0 AND COALESCE(a.aiMaxBudget, 0.0) < 2000 THEN 'MID_RANGE'
+        WHEN COALESCE(a.aiMaxBudget, 0.0) > 0 THEN 'PREMIUM'
         WHEN p.avgProductPrice < 500 THEN 'BUDGET'
         WHEN p.avgProductPrice < 2000 THEN 'MID_RANGE'
         ELSE 'PREMIUM'
@@ -95,6 +108,15 @@ SELECT
     -- Session info (from session_activity via JOIN)
     COALESCE(s.sessionDurationMs, CAST(0 AS BIGINT)) AS sessionDurationMs,
     COALESCE(s.deviceType, 'UNKNOWN') AS deviceType,
+
+    -- AI Search Activity (from ai_search_activity via JOIN)
+    -- These are STRONG intent signals - explicit queries > passive browsing
+    COALESCE(a.aiSearchCount, CAST(0 AS BIGINT)) AS aiSearchCount,
+    COALESCE(a.aiSearchQueries, ARRAY['']) AS aiSearchQueries,
+    COALESCE(a.aiSearchCategories, ARRAY['']) AS aiSearchCategories,
+    COALESCE(a.aiMaxBudget, 0.0) AS aiMaxBudget,
+    COALESCE(a.aiProductSearches, CAST(0 AS BIGINT)) AS aiProductSearches,
+    COALESCE(a.aiProductComparisons, CAST(0 AS BIGINT)) AS aiProductComparisons,
 
     -- Window timestamps
     p.windowStart,
@@ -115,4 +137,10 @@ LEFT JOIN cart_activity c
 -- Session info is aggregated at session level for reliable matching
 LEFT JOIN session_activity s
     ON p.userId = s.userId
-    AND p.sessionId = s.sessionId;
+    AND p.sessionId = s.sessionId
+
+-- LEFT JOIN AI search activity on same user and session
+-- AI queries provide explicit intent signals (stronger than passive browsing)
+LEFT JOIN ai_search_activity a
+    ON p.userId = a.userId
+    AND p.sessionId = a.sessionId;

@@ -13,33 +13,32 @@ This directory contains Flink SQL statements to run in Confluent Cloud.
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ user-events │     │product-views│     │ cart-events │
-└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-       │                   │                   │
-       ▼                   ▼                   ▼
-┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│session_activity│ │recent_product│   │cart_activity │
-│    (view)    │   │  _activity   │   │   (view)     │
-└──────┬───────┘   └──────┬───────┘   └──────┬───────┘
-       │                  │                   │
-       └──────────────────┼───────────────────┘
-                          │
-                   ┌──────▼──────┐
-                   │  LEFT JOIN  │
-                   │  on userId, │
-                   │ sessionId,  │
-                   │ timeBucket  │
-                   └──────┬──────┘
-                          │
-                   ┌──────▼──────┐
-                   │user-profiles│
-                   │   (topic)   │
-                   └─────────────┘
-                          │
-                   ┌──────▼──────┐
-                   │  AI Module  │
-                   └─────────────┘
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│ user-events │  │product-views│  │ cart-events │  │  ai-events  │
+└──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+       │                │                │                │
+       ▼                ▼                ▼                ▼
+┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
+│  session   │  │  recent    │  │   cart     │  │ ai_search  │
+│  activity  │  │  product   │  │  activity  │  │  activity  │
+│   (view)   │  │  activity  │  │   (view)   │  │   (view)   │
+└──────┬─────┘  └──────┬─────┘  └──────┬─────┘  └──────┬─────┘
+       │               │               │               │
+       └───────────────┼───────────────┼───────────────┘
+                       │               │
+                ┌──────▼───────────────▼──────┐
+                │         LEFT JOINs          │
+                │   on userId, sessionId      │
+                └──────────────┬──────────────┘
+                               │
+                        ┌──────▼──────┐
+                        │user-profiles│
+                        │   (topic)   │
+                        └─────────────┘
+                               │
+                        ┌──────▼──────┐
+                        │  AI Module  │
+                        └─────────────┘
 ```
 
 ## SQL Files
@@ -57,6 +56,7 @@ Auto-generated tables from Kafka topics have `timestamp` as STRING. These views 
 | `product_views_timed` | `product-views` | Parsed product view events |
 | `cart_events_timed` | `cart-events` | Parsed cart action events |
 | `user_events_timed` | `user-events` | Parsed user navigation events |
+| `ai_events_timed` | `ai-events` | Parsed AI chat/search events |
 
 #### Aggregation Views
 
@@ -66,12 +66,15 @@ Auto-generated tables from Kafka topics have `timestamp` as STRING. These views 
 | `cart_activity` | **Session-level** | `userId`, `sessionId` | Real-time cart state for entire session. Includes `currentCartTotal`, `currentCartItems`, `cartAdds`, `cartRemoves`, and products/categories in cart. |
 | `session_activity` | **Session-level** | `userId`, `sessionId` | Session-level behavior for entire session. Includes `deviceType`, page view counts by type, and `sessionDurationMs` (time between first and last event). |
 | `price_preferences` | 1-minute buckets | `userId`, `sessionId`, `timeBucket` | Derived from `recent_product_activity`. Classifies users: BUDGET (<₹500), MID_RANGE (₹500-₹2000), PREMIUM (>₹2000). |
+| `ai_search_activity` | **Session-level** | `userId`, `sessionId` | **AI chat interactions (strong intent signals)**. Includes `aiSearchCount`, `aiSearchQueries`, `aiSearchCategories`, `aiMaxBudget`, tool usage counts (`aiProductSearches`, `aiProductComparisons`). |
 
-**Note**: `cart_activity` and `session_activity` are aggregated at the session level (not time-bucketed) to ensure reliable JOINs regardless of when events occur within a session.
+**Note**: `cart_activity`, `session_activity`, and `ai_search_activity` are aggregated at the session level (not time-bucketed) to ensure reliable JOINs regardless of when events occur within a session.
+
+**Why AI events are valuable**: AI chat queries provide **explicit intent signals** that are stronger than passive browsing. When a user asks "laptops under 50000", that's a direct buying signal with category and budget information.
 
 ### 02-user-profiles.sql
 
-Creates the main user profile aggregation job using **LEFT JOINs** to combine all three event streams.
+Creates the main user profile aggregation job using **LEFT JOINs** to combine all four event streams.
 
 #### JOIN Strategy
 
@@ -83,12 +86,15 @@ LEFT JOIN cart_activity c
 LEFT JOIN session_activity s
     ON p.userId = s.userId
     AND p.sessionId = s.sessionId
+LEFT JOIN ai_search_activity a
+    ON p.userId = a.userId
+    AND p.sessionId = a.sessionId
 ```
 
 - **Base stream**: `recent_product_activity` (product views with 1-minute time buckets)
-- **LEFT JOIN**: Ensures profiles are created even when cart/session data is missing
-- **Join key for cart/session**: `(userId, sessionId)` - session-level matching
-- **Why session-level?**: Cart and session events may occur at different times than product views. Session-level aggregation ensures the JOIN always matches regardless of timing.
+- **LEFT JOIN**: Ensures profiles are created even when cart/session/AI data is missing
+- **Join key**: `(userId, sessionId)` - session-level matching for all joins
+- **Why session-level?**: Cart, session, and AI events may occur at different times than product views. Session-level aggregation ensures the JOIN always matches regardless of timing.
 - **COALESCE**: Handles null values when joined streams have no matching data
 
 #### Sink Table: `user-profiles`
@@ -108,16 +114,22 @@ Creates an upsert table with the following schema:
 | `totalCartAdds` | BIGINT | **cart_activity** | Cart additions count |
 | `avgViewDurationMs` | BIGINT | product_views | Average view duration |
 | `avgProductPrice` | DOUBLE | product_views | Average price of viewed products |
-| `pricePreference` | STRING | calculated | BUDGET / MID_RANGE / PREMIUM |
+| `pricePreference` | STRING | calculated | BUDGET / MID_RANGE / PREMIUM (AI budget preferred) |
 | `currentCartTotal` | DOUBLE | **cart_activity** | Current cart value |
 | `currentCartItems` | BIGINT | **cart_activity** | Items in cart |
 | `sessionDurationMs` | BIGINT | **session_activity** | Session duration |
 | `deviceType` | STRING | **session_activity** | User's device type |
+| `aiSearchCount` | BIGINT | **ai_search_activity** | Number of AI chat interactions |
+| `aiSearchQueries` | ARRAY | **ai_search_activity** | Recent AI search queries (explicit intent) |
+| `aiSearchCategories` | ARRAY | **ai_search_activity** | Categories searched via AI |
+| `aiMaxBudget` | DOUBLE | **ai_search_activity** | Max budget from AI price filters |
+| `aiProductSearches` | BIGINT | **ai_search_activity** | Count of product searches via AI |
+| `aiProductComparisons` | BIGINT | **ai_search_activity** | Count of product comparisons via AI |
 | `windowStart` | STRING | product_views | Window start timestamp |
 | `windowEnd` | STRING | product_views | Window end timestamp |
 | `lastUpdated` | STRING | product_views | Last update timestamp |
 
-**Bold** fields are populated via JOINs (previously were placeholders).
+**Bold** fields are populated via JOINs from cart, session, and AI activity streams.
 
 #### Configuration
 

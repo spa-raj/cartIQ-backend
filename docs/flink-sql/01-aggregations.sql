@@ -165,3 +165,56 @@ SELECT
     windowStart,
     windowEnd
 FROM recent_product_activity;
+
+
+-- ============================================================================
+-- 5. AI SEARCH ACTIVITY (Session-level aggregation)
+-- Aggregates AI chat interactions per user session
+-- Source: ai-events topic (Avro schema)
+-- AI queries provide STRONG intent signals (explicit search > passive browsing)
+-- ============================================================================
+CREATE VIEW `ai_events_timed` AS
+SELECT
+    eventId, userId, sessionId, query, searchType, toolName,
+    category, minPrice, maxPrice, minRating, resultsCount,
+    returnedProductIds, processingTimeMs,
+    TO_TIMESTAMP(`timestamp`) AS event_time
+FROM `ai-events`
+WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
+
+CREATE VIEW ai_search_activity AS
+SELECT
+    userId,
+    sessionId,
+    -- Count of AI chat interactions (strong engagement signal)
+    COUNT(*) AS aiSearchCount,
+    -- Collect AI search queries (explicit intent - more valuable than page views)
+    COALESCE(
+        ARRAY_SLICE(ARRAY_AGG(query), 1, 10),
+        ARRAY['']
+    ) AS aiSearchQueries,
+    -- Categories searched via AI (strong category interest signal)
+    COALESCE(
+        ARRAY_SLICE(ARRAY_DISTINCT(ARRAY_AGG(category)), 1, 5),
+        ARRAY['']
+    ) AS aiSearchCategories,
+    -- Price range preferences from AI searches (explicit budget signal)
+    COALESCE(AVG(minPrice), 0.0) AS aiAvgMinPrice,
+    COALESCE(AVG(maxPrice), 0.0) AS aiAvgMaxPrice,
+    COALESCE(MAX(maxPrice), 0.0) AS aiMaxBudget,
+    -- Tools used (searchProducts = browsing, getProductDetails = high intent)
+    COUNT(*) FILTER (WHERE toolName = 'searchProducts') AS aiProductSearches,
+    COUNT(*) FILTER (WHERE toolName = 'getProductDetails') AS aiProductDetailViews,
+    COUNT(*) FILTER (WHERE toolName = 'compareProducts') AS aiProductComparisons,
+    -- Total products shown by AI (candidates for purchase)
+    COALESCE(SUM(resultsCount), 0) AS aiTotalResultsShown,
+    -- Search types used
+    COUNT(*) FILTER (WHERE searchType = 'HYBRID') AS aiHybridSearches,
+    COUNT(*) FILTER (WHERE searchType = 'FTS') AS aiFtsSearches,
+    -- Average response time (for monitoring)
+    COALESCE(CAST(AVG(processingTimeMs) AS BIGINT), 0) AS aiAvgProcessingMs
+FROM `ai_events_timed`
+WHERE event_time IS NOT NULL
+GROUP BY
+    userId,
+    sessionId;
