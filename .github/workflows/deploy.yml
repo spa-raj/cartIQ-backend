@@ -80,6 +80,7 @@ jobs:
             --cpu-boost
             --add-cloudsql-instances=${{ secrets.GCP_PROJECT_ID }}:${{ env.REGION }}:${{ vars.CLOUD_SQL_INSTANCE_NAME || 'cartiq-db' }}
           env_vars: |
+            JAVA_TOOL_OPTIONS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
             SPRING_PROFILES_ACTIVE=prod
             GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
             GCP_LOCATION=${{ env.REGION }}
