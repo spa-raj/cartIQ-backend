@@ -96,6 +96,8 @@ public class VectorSearchService {
 
         try {
             List<Float> queryEmbedding = embeddingService.embedQuery(query);
+            log.debug("Generated query embedding with {} dimensions for query: {}",
+                    queryEmbedding.size(), query.length() > 50 ? query.substring(0, 50) + "..." : query);
             if (queryEmbedding.isEmpty()) {
                 log.warn("Failed to generate query embedding");
                 return List.of();
@@ -211,7 +213,11 @@ public class VectorSearchService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.setBearerAuth(accessToken);
 
-            HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(requestBody), headers);
+            String requestJson = objectMapper.writeValueAsString(requestBody);
+            HttpEntity<String> entity = new HttpEntity<>(requestJson, headers);
+
+            log.debug("Vector Search request to {}: deployed_index_id={}, embedding_size={}",
+                    restEndpointUrl, deployedIndexId, embedding.size());
 
             // Execute request
             long startTime = System.currentTimeMillis();
@@ -245,7 +251,8 @@ public class VectorSearchService {
             JsonNode nearestNeighbors = root.get("nearestNeighbors");
 
             if (nearestNeighbors == null || !nearestNeighbors.isArray()) {
-                log.warn("No nearestNeighbors in response");
+                log.warn("No nearestNeighbors in response. Raw response: {}",
+                        responseBody.length() > 500 ? responseBody.substring(0, 500) + "..." : responseBody);
                 return results;
             }
 
