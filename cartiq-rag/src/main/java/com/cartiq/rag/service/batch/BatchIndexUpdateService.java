@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -191,6 +192,69 @@ public class BatchIndexUpdateService {
         } catch (ExecutionException e) {
             throw new RuntimeException("Failed to start index update operation: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Get the status of an index update operation.
+     *
+     * @param operationName The operation name returned by startIndexUpdate
+     * @return Map containing operation status details
+     */
+    public Map<String, Object> getOperationStatus(String operationName) {
+        if (indexServiceClient == null) {
+            throw new IllegalStateException("IndexServiceClient not initialized");
+        }
+
+        try {
+            var operationsClient = indexServiceClient.getOperationsClient();
+            var operation = operationsClient.getOperation(operationName);
+
+            boolean done = operation.getDone();
+            String state;
+
+            if (done) {
+                if (operation.hasError()) {
+                    state = "FAILED";
+                    return Map.of(
+                            "operationName", operationName,
+                            "done", true,
+                            "state", state,
+                            "error", operation.getError().getMessage()
+                    );
+                } else {
+                    state = "SUCCEEDED";
+                    return Map.of(
+                            "operationName", operationName,
+                            "done", true,
+                            "state", state
+                    );
+                }
+            } else {
+                state = "RUNNING";
+                return Map.of(
+                        "operationName", operationName,
+                        "done", false,
+                        "state", state
+                );
+            }
+        } catch (Exception e) {
+            log.error("Failed to get operation status: {}", e.getMessage());
+            throw new RuntimeException("Failed to get operation status: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Get the GCS bucket from configuration.
+     */
+    public String getGcsBucket() {
+        return ragConfig.getBatchIndexing().getGcsBucket();
+    }
+
+    /**
+     * Get the vectors prefix from configuration.
+     */
+    public String getVectorsPrefix() {
+        return ragConfig.getBatchIndexing().getVectorsPrefix();
     }
 
     /**

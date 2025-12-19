@@ -189,15 +189,14 @@ jobs:
             exit 1
           fi
 
-      - name: Step 4 - Update Vector Search Index
+      - name: Step 4 - Start Vector Search Index Update
         id: update-index
         run: |
-          echo "Updating Vector Search index..."
+          echo "Starting Vector Search index update..."
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/update-index?timestamp=${{ steps.timestamp.outputs.timestamp }}&completeOverwrite=${{ inputs.complete_overwrite || 'true' }}" \
             -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            --max-time 3600)
+            -H "Content-Type: application/json")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | sed '$d')
@@ -206,13 +205,51 @@ jobs:
           echo "Response Body: $BODY"
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            INDEX_NAME=$(echo "$BODY" | jq -r '.indexName')
-            echo "index_name=$INDEX_NAME" >> $GITHUB_OUTPUT
-            echo "Index updated: $INDEX_NAME"
+            OPERATION_NAME=$(echo "$BODY" | jq -r '.operationName')
+            echo "operation_name=$OPERATION_NAME" >> $GITHUB_OUTPUT
+            echo "Index update started: $OPERATION_NAME"
           else
-            echo "Index update failed"
+            echo "Failed to start index update"
             exit 1
           fi
+
+      - name: Step 4b - Wait for Index Update to Complete
+        id: wait-index
+        run: |
+          echo "Waiting for index update to complete..."
+          echo "Operation: ${{ steps.update-index.outputs.operation_name }}"
+
+          MAX_ATTEMPTS=60  # 1 hour at 1 minute intervals
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+
+            RESPONSE=$(curl -s \
+              "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/update-index/status?operationName=${{ steps.update-index.outputs.operation_name }}" \
+              -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}")
+
+            STATE=$(echo "$RESPONSE" | jq -r '.state')
+            DONE=$(echo "$RESPONSE" | jq -r '.done')
+
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - State: $STATE, Done: $DONE"
+
+            if [ "$STATE" = "SUCCEEDED" ]; then
+              echo "Index update completed successfully!"
+              echo "index_name=${{ steps.update-index.outputs.operation_name }}" >> $GITHUB_OUTPUT
+              exit 0
+            elif [ "$STATE" = "FAILED" ]; then
+              ERROR=$(echo "$RESPONSE" | jq -r '.error // "Unknown error"')
+              echo "Index update failed: $ERROR"
+              exit 1
+            fi
+
+            # Wait 1 minute between checks
+            sleep 60
+          done
+
+          echo "Timeout waiting for index update"
+          exit 1
 
       - name: Summary
         if: always()
@@ -226,7 +263,8 @@ jobs:
           echo "| Embed Job | ${{ steps.embed.outcome }} | ${{ steps.embed.outputs.job_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Wait for Embed | ${{ steps.wait-embed.outcome }} | - |" >> $GITHUB_STEP_SUMMARY
           echo "| Transform | ${{ steps.transform.outcome }} | ${{ steps.transform.outputs.transformed_count }} vectors |" >> $GITHUB_STEP_SUMMARY
-          echo "| Update Index | ${{ steps.update-index.outcome }} | ${{ steps.update-index.outputs.index_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Start Index Update | ${{ steps.update-index.outcome }} | ${{ steps.update-index.outputs.operation_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wait for Index | ${{ steps.wait-index.outcome }} | - |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Configuration" >> $GITHUB_STEP_SUMMARY
           echo "- **Complete Overwrite**: ${{ inputs.complete_overwrite || 'true' }}" >> $GITHUB_STEP_SUMMARY

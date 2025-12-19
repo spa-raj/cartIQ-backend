@@ -262,7 +262,8 @@ public class BatchIndexingController {
     }
 
     /**
-     * Step 4: Update Vector Search index from GCS.
+     * Step 4: Start Vector Search index update from GCS (async).
+     * Returns immediately with operation name for status tracking.
      *
      * POST /api/internal/indexing/batch/update-index
      */
@@ -276,7 +277,7 @@ public class BatchIndexingController {
             return unauthorizedResponse();
         }
 
-        log.info("Received request to update index");
+        log.info("Received request to start index update");
 
         if (!batchIndexUpdateService.isAvailable()) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
@@ -284,22 +285,59 @@ public class BatchIndexingController {
         }
 
         try {
-            String result;
+            String gcsUri;
             if (vectorsGcsUri != null) {
-                result = batchIndexUpdateService.updateIndexFromGcs(vectorsGcsUri, completeOverwrite);
+                gcsUri = vectorsGcsUri;
             } else if (timestamp != null) {
-                result = batchIndexUpdateService.updateIndexFromGcs(timestamp);
+                // Build the GCS URI from timestamp using config
+                String bucket = batchIndexUpdateService.getGcsBucket();
+                String vectorsPrefix = batchIndexUpdateService.getVectorsPrefix();
+                gcsUri = String.format("gs://%s/%s/%s/", bucket, vectorsPrefix, timestamp);
             } else {
                 return ResponseEntity.badRequest()
                         .body(Map.of("error", "Either vectorsGcsUri or timestamp required"));
             }
 
+            // Start async update - returns immediately with operation name
+            String operationName = batchIndexUpdateService.startIndexUpdate(gcsUri, completeOverwrite);
+
             return ResponseEntity.ok(Map.of(
-                    "indexName", result,
-                    "message", "Index updated successfully"
+                    "operationName", operationName,
+                    "vectorsGcsUri", gcsUri,
+                    "message", "Index update started"
             ));
         } catch (Exception e) {
-            log.error("Index update failed: {}", e.getMessage(), e);
+            log.error("Index update failed to start: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Get status of an index update operation.
+     *
+     * GET /api/internal/indexing/batch/update-index/status
+     */
+    @GetMapping("/update-index/status")
+    public ResponseEntity<?> getIndexUpdateStatus(
+            @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey,
+            @RequestParam String operationName) {
+        if (!isValidApiKey(apiKey)) {
+            return unauthorizedResponse();
+        }
+
+        log.info("Checking status of index update: {}", operationName);
+
+        if (!batchIndexUpdateService.isAvailable()) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "Index update service not available"));
+        }
+
+        try {
+            var status = batchIndexUpdateService.getOperationStatus(operationName);
+            return ResponseEntity.ok(status);
+        } catch (Exception e) {
+            log.error("Failed to get operation status: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("error", e.getMessage()));
         }
