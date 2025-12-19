@@ -48,8 +48,8 @@ public class RagConfig {
         private int initialCandidates = 50;
         /** Number of final results to return after filtering/reranking */
         private int finalResults = 10;
-        /** Minimum similarity threshold (0-1) */
-        private double similarityThreshold = 0.7;
+        /** Minimum similarity threshold (0-1). Lower values return more results. */
+        private double similarityThreshold = 0.5;
     }
 
     @Data
