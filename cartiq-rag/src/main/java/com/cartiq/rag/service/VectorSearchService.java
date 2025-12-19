@@ -195,10 +195,20 @@ public class VectorSearchService {
 
             // Parse results
             List<SearchResult> results = new ArrayList<>();
+            int totalNeighbors = 0;
+            double minDistance = Double.MAX_VALUE;
+            double maxDistance = 0;
+
             for (FindNeighborsResponse.NearestNeighbors neighbors : response.getNearestNeighborsList()) {
+                log.debug("Received {} neighbors from Vector Search", neighbors.getNeighborsCount());
                 for (FindNeighborsResponse.Neighbor neighbor : neighbors.getNeighborsList()) {
+                    totalNeighbors++;
                     String datapointId = neighbor.getDatapoint().getDatapointId();
                     double distance = neighbor.getDistance();
+
+                    minDistance = Math.min(minDistance, distance);
+                    maxDistance = Math.max(maxDistance, distance);
+
                     // Convert distance to similarity score (1 - distance for cosine)
                     double similarity = 1.0 - distance;
 
@@ -212,8 +222,13 @@ public class VectorSearchService {
                 }
             }
 
-            log.info("Vector search for '{}' returned {} results (topK={})",
-                    results.size() > 0 ? "query" : "empty", results.size(), topK);
+            if (totalNeighbors > 0) {
+                log.info("Vector search: {} neighbors returned, distance range [{}, {}], {} passed threshold (>={})",
+                        totalNeighbors, String.format("%.4f", minDistance), String.format("%.4f", maxDistance),
+                        results.size(), ragConfig.getRetrieval().getSimilarityThreshold());
+            } else {
+                log.warn("Vector search returned 0 neighbors from index");
+            }
 
             return results;
 
