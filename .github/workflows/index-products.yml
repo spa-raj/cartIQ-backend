@@ -1,24 +1,29 @@
-name: Index Products to Vector Search
+name: Batch Index Products to Vector Search
 
 on:
   workflow_dispatch:
     inputs:
-      full_reindex:
-        description: 'Full reindex (true) or incremental (false)'
+      complete_overwrite:
+        description: 'Complete overwrite of index (true) or delta update (false)'
         required: true
         default: 'true'
         type: boolean
+  schedule:
+    # Run weekly on Sunday at 2 AM UTC
+    - cron: '0 2 * * 0'
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   REGION: ${{ vars.GCP_REGION || 'us-central1' }}
   SERVICE_NAME: cartiq-backend
+  GCS_BUCKET: cartiq-indexing-data
 
 jobs:
-  index-products:
-    name: Index Products to Vertex AI Vector Search
+  batch-index-products:
+    name: Batch Index Products to Vertex AI Vector Search
     runs-on: ubuntu-latest
     environment: prod
+    timeout-minutes: 180  # 3 hour timeout for large catalogs
 
     permissions:
       contents: read
@@ -49,14 +54,36 @@ jobs:
           echo "service_url=$SERVICE_URL" >> $GITHUB_OUTPUT
           echo "Cloud Run Service URL: $SERVICE_URL"
 
-      - name: Trigger Product Indexing
-        id: index
+      - name: Generate Timestamp
+        id: timestamp
         run: |
-          echo "Starting product indexing..."
-          echo "Full Reindex: ${{ inputs.full_reindex }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H-%M-%S")
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "Batch ID: $TIMESTAMP"
 
+      - name: Check Batch Indexing Health
+        run: |
+          echo "Checking batch indexing service health..."
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/products" \
+            "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/health" \
+            -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Health Check Response: $BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Health check failed with status $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Step 1 - Export Products to GCS
+        id: export
+        run: |
+          echo "Exporting products to GCS..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/export?timestamp=${{ steps.timestamp.outputs.timestamp }}" \
             -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}" \
             -H "Content-Type: application/json")
 
@@ -67,49 +94,141 @@ jobs:
           echo "Response Body: $BODY"
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-            echo "Indexing triggered successfully!"
-            echo "status=success" >> $GITHUB_OUTPUT
+            INPUT_GCS_URI=$(echo "$BODY" | jq -r '.inputGcsUri')
+            PRODUCT_COUNT=$(echo "$BODY" | jq -r '.productCount')
+            echo "input_gcs_uri=$INPUT_GCS_URI" >> $GITHUB_OUTPUT
+            echo "product_count=$PRODUCT_COUNT" >> $GITHUB_OUTPUT
+            echo "Exported $PRODUCT_COUNT products to: $INPUT_GCS_URI"
           else
-            echo "Failed to trigger indexing"
-            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "Export failed"
             exit 1
           fi
 
-      - name: Wait for Indexing to Complete
-        if: inputs.full_reindex == true
+      - name: Step 2 - Submit Batch Embedding Job
+        id: embed
         run: |
-          echo "Waiting for indexing to complete..."
-          echo "Note: Full indexing may take several minutes depending on catalog size."
-          echo "Check application logs for detailed progress."
+          echo "Submitting batch embedding job..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/embed?inputGcsUri=${{ steps.export.outputs.input_gcs_uri }}&timestamp=${{ steps.timestamp.outputs.timestamp }}" \
+            -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}" \
+            -H "Content-Type: application/json")
 
-          # Poll the status endpoint for completion
-          MAX_ATTEMPTS=30
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            JOB_NAME=$(echo "$BODY" | jq -r '.jobName')
+            echo "job_name=$JOB_NAME" >> $GITHUB_OUTPUT
+            echo "Batch job submitted: $JOB_NAME"
+          else
+            echo "Failed to submit embedding job"
+            exit 1
+          fi
+
+      - name: Step 2b - Wait for Embedding Job to Complete
+        id: wait-embed
+        run: |
+          echo "Waiting for batch embedding job to complete..."
+          echo "Job: ${{ steps.embed.outputs.job_name }}"
+
+          MAX_ATTEMPTS=120  # 2 hours at 1 minute intervals
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            echo "Checking status (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
 
-            STATUS=$(curl -s \
-              "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/status" \
+            RESPONSE=$(curl -s \
+              "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/embed/status?jobName=${{ steps.embed.outputs.job_name }}" \
               -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}")
 
-            echo "Status: $STATUS"
+            STATE=$(echo "$RESPONSE" | jq -r '.state')
+            OUTPUT_URI=$(echo "$RESPONSE" | jq -r '.outputUri')
 
-            # Sleep between checks
-            sleep 10
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - State: $STATE"
+
+            if [ "$STATE" = "JOB_STATE_SUCCEEDED" ]; then
+              echo "Embedding job completed successfully!"
+              echo "output_uri=$OUTPUT_URI" >> $GITHUB_OUTPUT
+              exit 0
+            elif [ "$STATE" = "JOB_STATE_FAILED" ] || [ "$STATE" = "JOB_STATE_CANCELLED" ]; then
+              echo "Embedding job failed with state: $STATE"
+              exit 1
+            fi
+
+            # Wait 1 minute between checks
+            sleep 60
           done
 
-          echo "Polling complete. Check application logs for final status."
+          echo "Timeout waiting for embedding job"
+          exit 1
+
+      - name: Step 3 - Transform Embeddings to Vector Search Format
+        id: transform
+        run: |
+          echo "Transforming embeddings to Vector Search format..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/transform?timestamp=${{ steps.timestamp.outputs.timestamp }}" \
+            -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            TRANSFORMED=$(echo "$BODY" | jq -r '.transformedCount')
+            echo "transformed_count=$TRANSFORMED" >> $GITHUB_OUTPUT
+            echo "Transformed $TRANSFORMED embeddings"
+          else
+            echo "Transform failed"
+            exit 1
+          fi
+
+      - name: Step 4 - Update Vector Search Index
+        id: update-index
+        run: |
+          echo "Updating Vector Search index..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "${{ steps.get-url.outputs.service_url }}/api/internal/indexing/batch/update-index?timestamp=${{ steps.timestamp.outputs.timestamp }}&completeOverwrite=${{ inputs.complete_overwrite || 'true' }}" \
+            -H "X-Internal-Api-Key: ${{ secrets.INTERNAL_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 3600)
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "Response Code: $HTTP_CODE"
+          echo "Response Body: $BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            INDEX_NAME=$(echo "$BODY" | jq -r '.indexName')
+            echo "index_name=$INDEX_NAME" >> $GITHUB_OUTPUT
+            echo "Index updated: $INDEX_NAME"
+          else
+            echo "Index update failed"
+            exit 1
+          fi
 
       - name: Summary
+        if: always()
         run: |
-          echo "## Product Indexing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Batch Product Indexing Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Full Reindex | ${{ inputs.full_reindex }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Service URL | ${{ steps.get-url.outputs.service_url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Trigger Status | ${{ steps.index.outputs.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Step | Status | Details |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | - | ${{ steps.timestamp.outputs.timestamp }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Export | ${{ steps.export.outcome }} | ${{ steps.export.outputs.product_count }} products → ${{ steps.export.outputs.input_gcs_uri }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Embed Job | ${{ steps.embed.outcome }} | ${{ steps.embed.outputs.job_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wait for Embed | ${{ steps.wait-embed.outcome }} | - |" >> $GITHUB_STEP_SUMMARY
+          echo "| Transform | ${{ steps.transform.outcome }} | ${{ steps.transform.outputs.transformed_count }} vectors |" >> $GITHUB_STEP_SUMMARY
+          echo "| Update Index | ${{ steps.update-index.outcome }} | ${{ steps.update-index.outputs.index_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check Cloud Run logs for detailed indexing progress." >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Complete Overwrite**: ${{ inputs.complete_overwrite || 'true' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service URL**: ${{ steps.get-url.outputs.service_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **GCS Bucket**: ${{ env.GCS_BUCKET }}" >> $GITHUB_STEP_SUMMARY

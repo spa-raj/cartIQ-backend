@@ -611,7 +611,95 @@ gcloud ai index-endpoints describe $INDEX_ENDPOINT_ID --region=$REGION
 
 ---
 
-## 8. Verify Setup
+## 8. Create GCS Bucket for Batch Indexing
+
+The batch indexing pipeline requires a GCS bucket to store intermediate files during the indexing process.
+
+### Step 8.1: Create the Bucket
+
+```bash
+# Set bucket name
+export BATCH_INDEXING_BUCKET="cartiq-indexing-data"
+
+# Create the bucket with uniform bucket-level access
+gcloud storage buckets create gs://${BATCH_INDEXING_BUCKET} \
+  --project=$PROJECT_ID \
+  --location=$REGION \
+  --uniform-bucket-level-access
+
+# Verify bucket was created
+gcloud storage buckets describe gs://${BATCH_INDEXING_BUCKET}
+```
+
+### Step 8.2: Grant Service Account Permissions
+
+The Cloud Run service account needs read/write access to the bucket:
+
+```bash
+# Get Cloud Run service account
+# Option A: If using a custom service account
+export SA_EMAIL="cartiq-backend@${PROJECT_ID}.iam.gserviceaccount.com"
+
+# Option B: If using default compute service account
+# export SA_EMAIL="$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
+
+# Grant Storage Object Admin role on the bucket
+gcloud storage buckets add-iam-policy-binding gs://${BATCH_INDEXING_BUCKET} \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/storage.objectAdmin"
+
+echo "Granted storage.objectAdmin to ${SA_EMAIL} on gs://${BATCH_INDEXING_BUCKET}"
+```
+
+### Step 8.3: Bucket Structure
+
+The batch indexing pipeline automatically creates this folder structure:
+
+```
+gs://cartiq-indexing-data/
+├── input/                              # Step 1: Product export
+│   └── {timestamp}/
+│       └── products.jsonl              # Products in batch prediction format
+├── embeddings/                         # Step 2: Batch embedding output
+│   └── {timestamp}/
+│       └── predictions-*.jsonl         # Embeddings from Vertex AI
+└── vectors/                            # Step 3: Vector Search format
+    └── {timestamp}/
+        └── products.jsonl              # Ready for index update
+```
+
+### Step 8.4: Configure Application
+
+Add these properties to your `application.properties` or environment variables:
+
+```properties
+# Batch Indexing Configuration
+cartiq.rag.batch-indexing.gcs-bucket=cartiq-indexing-data
+cartiq.rag.batch-indexing.input-prefix=input
+cartiq.rag.batch-indexing.embeddings-prefix=embeddings
+cartiq.rag.batch-indexing.vectors-prefix=vectors
+cartiq.rag.batch-indexing.embedding-model=text-embedding-004
+cartiq.rag.batch-indexing.complete-overwrite=true
+```
+
+### Step 8.5: Verify Bucket Access
+
+```bash
+# Test write access
+echo "test" | gcloud storage cp - gs://${BATCH_INDEXING_BUCKET}/test.txt
+
+# Verify file exists
+gcloud storage ls gs://${BATCH_INDEXING_BUCKET}/
+
+# Clean up test file
+gcloud storage rm gs://${BATCH_INDEXING_BUCKET}/test.txt
+
+echo "Bucket access verified!"
+```
+
+---
+
+## 9. Verify Setup
 
 ### Check All Resources
 
@@ -635,6 +723,9 @@ gcloud iam service-accounts list --filter="email:cartiq-backend"
 
 echo -e "\n6. Secrets:"
 gcloud secrets list --format="table(name,createTime)"
+
+echo -e "\n7. Batch Indexing Bucket:"
+gcloud storage buckets describe gs://cartiq-indexing-data --format="table(name,location,storageClass)"
 ```
 
 ### Test Vertex AI Embeddings
@@ -654,7 +745,7 @@ curl -X POST \
 
 ---
 
-## 9. Environment Variables Summary
+## 10. Environment Variables Summary
 
 After setup, you'll need these environment variables for the application:
 
@@ -711,7 +802,7 @@ echo ".env file created!"
 ---
 
 
-## 10. Cost Estimates
+## 11. Cost Estimates
 
 | Resource | Configuration | Monthly Cost |
 |----------|---------------|--------------|
@@ -730,7 +821,7 @@ echo ".env file created!"
 
 ---
 
-## 11. Cleanup (After Hackathon)
+## 12. Cleanup (After Hackathon)
 
 ```bash
 # Delete Vector Search resources
@@ -747,8 +838,9 @@ gcloud sql instances delete cartiq-db --quiet
 # Delete Redis
 gcloud redis instances delete cartiq-cache --region=$REGION
 
-# Delete GCS bucket
+# Delete GCS buckets
 gcloud storage rm -r gs://${BUCKET_NAME}
+gcloud storage rm -r gs://cartiq-indexing-data
 
 # Delete secrets
 gcloud secrets delete jwt-secret --quiet 2>/dev/null || true
@@ -805,7 +897,8 @@ gcloud projects get-iam-policy $PROJECT_ID \
 | Index ID | `gcloud ai indexes list --region=$REGION --format="value(name)"` |
 | Endpoint ID | `gcloud ai index-endpoints list --region=$REGION --format="value(name)"` |
 | Project ID | `gcloud config get-value project` |
+| Batch Indexing Bucket | `gcloud storage buckets describe gs://cartiq-indexing-data` |
 
 ---
 
-*Last updated: December 12, 2025*
+*Last updated: December 19, 2025*

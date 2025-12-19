@@ -75,4 +75,22 @@ public class RagConfig {
         /** Whether to index products on application startup */
         private boolean onStartup = false;
     }
+
+    @Data
+    public static class BatchIndexing {
+        /** GCS bucket for batch indexing data */
+        private String gcsBucket = "cartiq-indexing-data";
+        /** GCS path prefix for input files */
+        private String inputPrefix = "input";
+        /** GCS path prefix for embedding output files */
+        private String embeddingsPrefix = "embeddings";
+        /** GCS path prefix for vector search format files */
+        private String vectorsPrefix = "vectors";
+        /** Embedding model for batch prediction */
+        private String embeddingModel = "text-embedding-004";
+        /** Whether to do a complete overwrite when updating index */
+        private boolean completeOverwrite = true;
+    }
+
+    private BatchIndexing batchIndexing = new BatchIndexing();
 }
