@@ -79,7 +79,7 @@ public class EmbeddingTransformService {
         // Paths based on timestamp
         String metadataGcsUri = String.format("gs://%s/%s/%s/metadata.jsonl", bucket, inputPrefix, timestamp);
         String embeddingsGcsPrefix = String.format("gs://%s/%s/%s/", bucket, embeddingsPrefix, timestamp);
-        String outputGcsUri = String.format("gs://%s/%s/%s/products.jsonl", bucket, vectorsPrefix, timestamp);
+        String outputGcsUri = String.format("gs://%s/%s/%s/products.json", bucket, vectorsPrefix, timestamp);
 
         return transformToVectorSearchFormat(metadataGcsUri, embeddingsGcsPrefix, outputGcsUri);
     }
