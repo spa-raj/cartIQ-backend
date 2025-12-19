@@ -554,17 +554,18 @@ public class GeminiService {
             long startTime) {
 
         try {
+            // Avro serializer requires non-null values - use defaults for optional fields
             AISearchEvent event = AISearchEvent.builder()
                     .eventId(UUID.randomUUID().toString())
-                    .userId(userId)
-                    .sessionId(sessionId)
-                    .query(originalQuery)
+                    .userId(userId != null ? userId : "anonymous")
+                    .sessionId(sessionId != null ? sessionId : "")
+                    .query(originalQuery != null ? originalQuery : "")
                     .searchType("TOOL_CALL")
-                    .toolName(toolName)
-                    .category(category)
-                    .minPrice(minPrice)
-                    .maxPrice(maxPrice)
-                    .minRating(minRating)
+                    .toolName(toolName != null ? toolName : "")
+                    .category(category != null ? category : "")
+                    .minPrice(minPrice != null ? minPrice : 0.0)
+                    .maxPrice(maxPrice != null ? maxPrice : 0.0)
+                    .minRating(minRating != null ? minRating : 0.0)
                     .resultsCount(products.size())
                     .returnedProductIds(products.stream()
                             .map(p -> p.getId().toString())
