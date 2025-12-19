@@ -10,9 +10,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+import java.nio.ByteBuffer;
+import java.nio.channels.WritableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 
 /**
  * Service for transforming batch embedding output to Vector Search format.
@@ -79,6 +86,7 @@ public class EmbeddingTransformService {
 
     /**
      * Transform batch embedding output to Vector Search format.
+     * Uses streaming to avoid loading all data into memory.
      *
      * @param metadataGcsUri GCS URI of metadata file (gs://bucket/input/timestamp/metadata.jsonl)
      * @param embeddingsGcsPrefix GCS URI prefix containing embedding output (gs://bucket/embeddings/timestamp/)
@@ -90,65 +98,65 @@ public class EmbeddingTransformService {
             throw new IllegalStateException("GCS client not initialized. Check project configuration.");
         }
 
-        log.info("Transforming embeddings: metadata={}, embeddings={}, output={}",
+        log.info("Transforming embeddings (streaming): metadata={}, embeddings={}, output={}",
                 metadataGcsUri, embeddingsGcsPrefix, outputGcsUri);
         long startTime = System.currentTimeMillis();
 
-        // Step 1: Read metadata file (preserves order)
-        List<JsonNode> metadataList = readMetadataFile(metadataGcsUri);
-        if (metadataList.isEmpty()) {
-            log.warn("No metadata found in {}", metadataGcsUri);
-            return 0;
-        }
-        log.info("Loaded {} metadata records", metadataList.size());
-
-        // Step 2: Read all embedding outputs (preserves order from batch prediction)
-        List<JsonNode> embeddingsList = readEmbeddingsFiles(embeddingsGcsPrefix);
-        if (embeddingsList.isEmpty()) {
+        // Get embedding files in sorted order
+        List<Blob> embeddingFiles = getEmbeddingFiles(embeddingsGcsPrefix);
+        if (embeddingFiles.isEmpty()) {
             log.warn("No embeddings found in {}", embeddingsGcsPrefix);
             return 0;
         }
-        log.info("Loaded {} embedding records", embeddingsList.size());
+        log.info("Found {} embedding files", embeddingFiles.size());
 
-        // Step 3: Verify counts match
-        if (metadataList.size() != embeddingsList.size()) {
-            log.warn("Metadata count ({}) != Embeddings count ({}). Using minimum.",
-                    metadataList.size(), embeddingsList.size());
-        }
-
-        int count = Math.min(metadataList.size(), embeddingsList.size());
-
-        // Step 4: Combine and transform
-        StringBuilder output = new StringBuilder();
-        int transformed = 0;
-        int failed = 0;
-
-        for (int i = 0; i < count; i++) {
-            try {
-                JsonNode metadata = metadataList.get(i);
-                JsonNode embedding = embeddingsList.get(i);
-
-                String vectorSearchLine = buildVectorSearchLine(metadata, embedding);
-                if (vectorSearchLine != null) {
-                    output.append(vectorSearchLine).append("\n");
-                    transformed++;
-                }
-            } catch (Exception e) {
-                log.warn("Failed to transform record {}: {}", i, e.getMessage());
-                failed++;
-            }
-        }
-
-        // Step 5: Write output to GCS
+        // Create output file with streaming write
         String outputBucket = extractBucket(outputGcsUri);
         String outputPath = extractPath(outputGcsUri);
-
         BlobId blobId = BlobId.of(outputBucket, outputPath);
         BlobInfo blobInfo = BlobInfo.newBuilder(blobId)
                 .setContentType("application/jsonl")
                 .build();
 
-        storage.create(blobInfo, output.toString().getBytes(StandardCharsets.UTF_8));
+        int transformed = 0;
+        int failed = 0;
+
+        // Stream: read metadata line by line, match with embeddings, write output immediately
+        try (WritableByteChannel outputChannel = storage.writer(blobInfo)) {
+            // Create iterators for streaming
+            Iterator<String> metadataIterator = createMetadataIterator(metadataGcsUri);
+            Iterator<String> embeddingsIterator = createEmbeddingsIterator(embeddingFiles);
+
+            int recordIndex = 0;
+            while (metadataIterator.hasNext() && embeddingsIterator.hasNext()) {
+                String metadataLine = metadataIterator.next();
+                String embeddingLine = embeddingsIterator.next();
+
+                try {
+                    JsonNode metadata = objectMapper.readTree(metadataLine);
+                    JsonNode embedding = objectMapper.readTree(embeddingLine);
+
+                    String vectorSearchLine = buildVectorSearchLine(metadata, embedding);
+                    if (vectorSearchLine != null) {
+                        // Write directly to GCS
+                        byte[] lineBytes = (vectorSearchLine + "\n").getBytes(StandardCharsets.UTF_8);
+                        outputChannel.write(ByteBuffer.wrap(lineBytes));
+                        transformed++;
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to transform record {}: {}", recordIndex, e.getMessage());
+                    failed++;
+                }
+
+                recordIndex++;
+                if (recordIndex % 5000 == 0) {
+                    log.info("Progress: processed {} records, transformed {}", recordIndex, transformed);
+                }
+            }
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write output to GCS: " + e.getMessage(), e);
+        }
 
         long duration = System.currentTimeMillis() - startTime;
         log.info("Transformed {} embeddings ({} failed) to {} in {}ms",
@@ -158,51 +166,18 @@ public class EmbeddingTransformService {
     }
 
     /**
-     * Read metadata file from GCS.
+     * Get sorted list of embedding files from GCS prefix.
      */
-    private List<JsonNode> readMetadataFile(String gcsUri) {
-        List<JsonNode> result = new ArrayList<>();
-
-        String bucket = extractBucket(gcsUri);
-        String path = extractPath(gcsUri);
-
-        Blob blob = storage.get(BlobId.of(bucket, path));
-        if (blob == null) {
-            log.error("Metadata file not found: {}", gcsUri);
-            return result;
-        }
-
-        String content = new String(blob.getContent(), StandardCharsets.UTF_8);
-        for (String line : content.split("\n")) {
-            if (!line.isBlank()) {
-                try {
-                    result.add(objectMapper.readTree(line));
-                } catch (Exception e) {
-                    log.warn("Failed to parse metadata line: {}", e.getMessage());
-                }
-            }
-        }
-
-        return result;
-    }
-
-    /**
-     * Read all embedding output files from GCS prefix.
-     * Batch prediction outputs are named like: predictions-00001-of-00010.jsonl
-     */
-    private List<JsonNode> readEmbeddingsFiles(String gcsPrefix) {
-        List<JsonNode> result = new ArrayList<>();
-
+    private List<Blob> getEmbeddingFiles(String gcsPrefix) {
         String bucket = extractBucket(gcsPrefix);
         String prefix = extractPath(gcsPrefix);
 
         Bucket storageBucket = storage.get(bucket);
         if (storageBucket == null) {
             log.error("Bucket not found: {}", bucket);
-            return result;
+            return List.of();
         }
 
-        // Collect all prediction files and sort them
         List<Blob> predictionFiles = new ArrayList<>();
         for (Blob blob : storageBucket.list(Storage.BlobListOption.prefix(prefix)).iterateAll()) {
             if (!blob.getName().endsWith("/") && blob.getName().contains("prediction")) {
@@ -210,25 +185,111 @@ public class EmbeddingTransformService {
             }
         }
 
-        // Sort by name to maintain order
         predictionFiles.sort((a, b) -> a.getName().compareTo(b.getName()));
+        return predictionFiles;
+    }
 
-        // Read each file in order
-        for (Blob blob : predictionFiles) {
-            log.debug("Reading prediction file: {}", blob.getName());
-            String content = new String(blob.getContent(), StandardCharsets.UTF_8);
-            for (String line : content.split("\n")) {
-                if (!line.isBlank()) {
-                    try {
-                        result.add(objectMapper.readTree(line));
-                    } catch (Exception e) {
-                        log.warn("Failed to parse embedding line: {}", e.getMessage());
-                    }
-                }
+    /**
+     * Create an iterator that reads metadata file line by line.
+     */
+    private Iterator<String> createMetadataIterator(String gcsUri) {
+        String bucket = extractBucket(gcsUri);
+        String path = extractPath(gcsUri);
+
+        Blob blob = storage.get(BlobId.of(bucket, path));
+        if (blob == null) {
+            log.error("Metadata file not found: {}", gcsUri);
+            return List.<String>of().iterator();
+        }
+
+        // Read content and create line iterator
+        String content = new String(blob.getContent(), StandardCharsets.UTF_8);
+        return new LineIterator(content);
+    }
+
+    /**
+     * Create an iterator that reads embeddings from multiple files in order.
+     */
+    private Iterator<String> createEmbeddingsIterator(List<Blob> embeddingFiles) {
+        return new MultiFileLineIterator(embeddingFiles);
+    }
+
+    /**
+     * Simple line iterator that doesn't hold all lines in memory at once.
+     */
+    private static class LineIterator implements Iterator<String> {
+        private final BufferedReader reader;
+        private String nextLine;
+
+        LineIterator(String content) {
+            this.reader = new BufferedReader(new StringReader(content));
+            advance();
+        }
+
+        private void advance() {
+            try {
+                do {
+                    nextLine = reader.readLine();
+                } while (nextLine != null && nextLine.isBlank());
+            } catch (IOException e) {
+                nextLine = null;
             }
         }
 
-        return result;
+        @Override
+        public boolean hasNext() {
+            return nextLine != null;
+        }
+
+        @Override
+        public String next() {
+            if (nextLine == null) {
+                throw new NoSuchElementException();
+            }
+            String result = nextLine;
+            advance();
+            return result;
+        }
+    }
+
+    /**
+     * Iterator that reads lines from multiple blobs in sequence.
+     */
+    private class MultiFileLineIterator implements Iterator<String> {
+        private final Iterator<Blob> blobIterator;
+        private Iterator<String> currentLineIterator;
+
+        MultiFileLineIterator(List<Blob> blobs) {
+            this.blobIterator = blobs.iterator();
+            advanceToNextFile();
+        }
+
+        private void advanceToNextFile() {
+            currentLineIterator = null;
+            while (blobIterator.hasNext() && (currentLineIterator == null || !currentLineIterator.hasNext())) {
+                Blob blob = blobIterator.next();
+                log.debug("Reading embedding file: {}", blob.getName());
+                String content = new String(blob.getContent(), StandardCharsets.UTF_8);
+                currentLineIterator = new LineIterator(content);
+            }
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (currentLineIterator != null && currentLineIterator.hasNext()) {
+                return true;
+            }
+            advanceToNextFile();
+            return currentLineIterator != null && currentLineIterator.hasNext();
+        }
+
+        @Override
+        public String next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            return currentLineIterator.next();
+        }
     }
 
     /**
