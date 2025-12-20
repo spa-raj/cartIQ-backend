@@ -1,0 +1,381 @@
+package com.cartiq.ai.service;
+
+import com.cartiq.ai.dto.SuggestionsResponse;
+import com.cartiq.kafka.dto.UserProfile;
+import com.cartiq.product.dto.ProductDTO;
+import com.cartiq.product.service.ProductService;
+import com.cartiq.rag.dto.SearchResult;
+import com.cartiq.rag.service.VectorSearchService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * Service for generating personalized product suggestions.
+ *
+ * Recommendation Strategies (in priority order):
+ * 1. AI Intent - Products matching explicit AI chat queries (strongest signal)
+ * 2. Similar Products - Vector search based on recently viewed products
+ * 3. Category Affinity - Top-rated products in browsed categories
+ * 4. Cold Start - Trending/featured products (fallback)
+ */
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class SuggestionsService {
+
+    private final RedisTemplate<String, Object> redisTemplate;
+    private final ProductService productService;
+    private final VectorSearchService vectorSearchService;
+
+    @Value("${cartiq.suggestions.cache.prefix:user-profile:}")
+    private String cachePrefix;
+
+    /**
+     * Get personalized product suggestions for a user.
+     *
+     * @param userId User ID (can be null for anonymous users)
+     * @param limit Maximum number of suggestions to return
+     * @return SuggestionsResponse with products and metadata
+     */
+    public SuggestionsResponse getSuggestions(String userId, int limit) {
+        log.debug("Getting suggestions for userId={}, limit={}", userId, limit);
+
+        UserProfile profile = getUserProfile(userId);
+
+        List<ProductDTO> suggestions = new ArrayList<>();
+        Map<String, String> strategyUsed = new LinkedHashMap<>();
+
+        int remaining = limit;
+
+        // Strategy 1: AI Intent (strongest signal - 40% of results)
+        if (profile != null && hasAIIntent(profile)) {
+            int aiLimit = Math.min(remaining, (int) Math.ceil(limit * 0.4));
+            List<ProductDTO> aiProducts = getAIIntentProducts(profile, aiLimit);
+            suggestions.addAll(aiProducts);
+            remaining -= aiProducts.size();
+            strategyUsed.put("ai_intent", String.valueOf(aiProducts.size()));
+            log.debug("AI intent strategy returned {} products", aiProducts.size());
+        }
+
+        // Strategy 2: Similar to recently viewed (30% of results)
+        if (profile != null && hasRecentViews(profile) && remaining > 0) {
+            int similarLimit = Math.min(remaining, (int) Math.ceil(limit * 0.3));
+            List<ProductDTO> similarProducts = getSimilarProducts(profile, similarLimit, suggestions);
+            suggestions.addAll(similarProducts);
+            remaining -= similarProducts.size();
+            strategyUsed.put("similar_products", String.valueOf(similarProducts.size()));
+            log.debug("Similar products strategy returned {} products", similarProducts.size());
+        }
+
+        // Strategy 3: Category affinity (20% of results)
+        if (profile != null && hasCategories(profile) && remaining > 0) {
+            int categoryLimit = Math.min(remaining, (int) Math.ceil(limit * 0.2));
+            List<ProductDTO> categoryProducts = getCategoryProducts(profile, categoryLimit, suggestions);
+            suggestions.addAll(categoryProducts);
+            remaining -= categoryProducts.size();
+            strategyUsed.put("category_affinity", String.valueOf(categoryProducts.size()));
+            log.debug("Category affinity strategy returned {} products", categoryProducts.size());
+        }
+
+        // Strategy 4: Cold start / Fill remaining (10% or all if no profile)
+        if (remaining > 0) {
+            List<ProductDTO> trendingProducts = getTrendingProducts(remaining, suggestions);
+            suggestions.addAll(trendingProducts);
+            strategyUsed.put("trending", String.valueOf(trendingProducts.size()));
+            log.debug("Trending strategy returned {} products", trendingProducts.size());
+        }
+
+        // Final deduplication and limit
+        List<ProductDTO> finalSuggestions = deduplicateAndLimit(suggestions, limit);
+
+        log.info("Returning {} suggestions for userId={}, personalized={}, strategies={}",
+                finalSuggestions.size(), userId, profile != null, strategyUsed);
+
+        return SuggestionsResponse.builder()
+                .products(finalSuggestions)
+                .totalCount(finalSuggestions.size())
+                .personalized(profile != null)
+                .strategies(strategyUsed)
+                .userId(userId)
+                .build();
+    }
+
+    /**
+     * Fetch user profile from Redis cache.
+     */
+    private UserProfile getUserProfile(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return null;
+        }
+
+        try {
+            String cacheKey = cachePrefix + userId;
+            Object cached = redisTemplate.opsForValue().get(cacheKey);
+
+            if (cached instanceof UserProfile userProfile) {
+                return userProfile;
+            } else if (cached instanceof LinkedHashMap) {
+                // Handle Jackson deserialization as LinkedHashMap
+                return convertToUserProfile((LinkedHashMap<?, ?>) cached);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to get user profile from cache for userId={}: {}", userId, e.getMessage());
+        }
+
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private UserProfile convertToUserProfile(LinkedHashMap<?, ?> map) {
+        try {
+            return UserProfile.builder()
+                    .userId((String) map.get("userId"))
+                    .sessionId((String) map.get("sessionId"))
+                    .recentProductIds((List<String>) map.get("recentProductIds"))
+                    .recentCategories((List<String>) map.get("recentCategories"))
+                    .recentSearchQueries((List<String>) map.get("recentSearchQueries"))
+                    .totalProductViews(toLong(map.get("totalProductViews")))
+                    .avgViewDurationMs(toLong(map.get("avgViewDurationMs")))
+                    .avgProductPrice(toDouble(map.get("avgProductPrice")))
+                    .totalCartAdds(toLong(map.get("totalCartAdds")))
+                    .currentCartTotal(toDouble(map.get("currentCartTotal")))
+                    .currentCartItems(toLong(map.get("currentCartItems")))
+                    .deviceType((String) map.get("deviceType"))
+                    .sessionDurationMs(toLong(map.get("sessionDurationMs")))
+                    .pricePreference((String) map.get("pricePreference"))
+                    .aiSearchCount(toLong(map.get("aiSearchCount")))
+                    .aiSearchQueries((List<String>) map.get("aiSearchQueries"))
+                    .aiSearchCategories((List<String>) map.get("aiSearchCategories"))
+                    .aiMaxBudget(toDouble(map.get("aiMaxBudget")))
+                    .aiProductSearches(toLong(map.get("aiProductSearches")))
+                    .aiProductComparisons(toLong(map.get("aiProductComparisons")))
+                    .build();
+        } catch (Exception e) {
+            log.warn("Failed to convert LinkedHashMap to UserProfile: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private Long toLong(Object value) {
+        if (value == null) return 0L;
+        if (value instanceof Long l) return l;
+        if (value instanceof Number n) return n.longValue();
+        return 0L;
+    }
+
+    private Double toDouble(Object value) {
+        if (value == null) return 0.0;
+        if (value instanceof Double d) return d;
+        if (value instanceof Number n) return n.doubleValue();
+        return 0.0;
+    }
+
+    private boolean hasAIIntent(UserProfile profile) {
+        return (profile.getAiSearchCategories() != null && !profile.getAiSearchCategories().isEmpty()
+                && !profile.getAiSearchCategories().stream().allMatch(String::isBlank))
+                || (profile.getAiMaxBudget() != null && profile.getAiMaxBudget() > 0);
+    }
+
+    private boolean hasRecentViews(UserProfile profile) {
+        return profile.getRecentProductIds() != null && !profile.getRecentProductIds().isEmpty();
+    }
+
+    private boolean hasCategories(UserProfile profile) {
+        return profile.getRecentCategories() != null && !profile.getRecentCategories().isEmpty()
+                && !profile.getRecentCategories().stream().allMatch(String::isBlank);
+    }
+
+    /**
+     * Strategy 1: AI Intent Products
+     * Uses explicit signals from AI chat (category, budget)
+     */
+    private List<ProductDTO> getAIIntentProducts(UserProfile profile, int limit) {
+        try {
+            List<String> categories = profile.getAiSearchCategories();
+            Double maxBudget = profile.getAiMaxBudget();
+
+            // Build a semantic query from AI interactions
+            String query = categories != null
+                    ? categories.stream().filter(c -> c != null && !c.isBlank()).collect(Collectors.joining(" "))
+                    : "";
+
+            if (query.isBlank()) {
+                return List.of();
+            }
+
+            // Use vector search with price filter
+            Map<String, Object> filters = new HashMap<>();
+            if (maxBudget != null && maxBudget > 0) {
+                filters.put("maxPrice", maxBudget);
+            }
+
+            List<SearchResult> results = vectorSearchService.search(query, limit, filters);
+
+            // Convert SearchResults to ProductDTOs
+            List<UUID> productIds = results.stream()
+                    .map(r -> UUID.fromString(r.getProductId()))
+                    .toList();
+
+            return productService.getProductsByIds(productIds);
+
+        } catch (Exception e) {
+            log.warn("AI intent strategy failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Strategy 2: Similar Products
+     * Vector search based on recently viewed product embeddings
+     */
+    private List<ProductDTO> getSimilarProducts(UserProfile profile, int limit, List<ProductDTO> existing) {
+        try {
+            // Get most recently viewed product
+            String recentProductId = profile.getRecentProductIds().get(0);
+            ProductDTO recentProduct = productService.getProductById(UUID.fromString(recentProductId));
+
+            if (recentProduct == null) {
+                return List.of();
+            }
+
+            // Build query from product attributes
+            String query = buildProductQuery(recentProduct);
+
+            // Search for similar products
+            List<SearchResult> results = vectorSearchService.search(query, limit + 5, Map.of());
+
+            // Get existing product IDs to exclude
+            Set<UUID> existingIds = existing.stream()
+                    .map(ProductDTO::getId)
+                    .collect(Collectors.toSet());
+            existingIds.add(UUID.fromString(recentProductId)); // Also exclude the source product
+
+            // Convert and filter
+            List<UUID> productIds = results.stream()
+                    .map(r -> UUID.fromString(r.getProductId()))
+                    .filter(id -> !existingIds.contains(id))
+                    .limit(limit)
+                    .toList();
+
+            return productService.getProductsByIds(productIds);
+
+        } catch (Exception e) {
+            log.warn("Similar products strategy failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Strategy 3: Category Products
+     * Top-rated products in user's browsed categories, filtered by price preference
+     */
+    private List<ProductDTO> getCategoryProducts(UserProfile profile, int limit, List<ProductDTO> existing) {
+        try {
+            List<String> categories = profile.getRecentCategories().stream()
+                    .filter(c -> c != null && !c.isBlank())
+                    .toList();
+
+            if (categories.isEmpty()) {
+                return List.of();
+            }
+
+            PriceRange priceRange = getPriceRange(profile.getPricePreference());
+
+            List<ProductDTO> categoryProducts = productService.findTopRatedByCategories(
+                    categories,
+                    priceRange.min(),
+                    priceRange.max(),
+                    limit + existing.size() // Get extra to account for filtering
+            );
+
+            // Filter out already included products
+            Set<UUID> existingIds = existing.stream()
+                    .map(ProductDTO::getId)
+                    .collect(Collectors.toSet());
+
+            return categoryProducts.stream()
+                    .filter(p -> !existingIds.contains(p.getId()))
+                    .limit(limit)
+                    .toList();
+
+        } catch (Exception e) {
+            log.warn("Category products strategy failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
+     * Strategy 4: Trending/Featured Products (Cold Start)
+     */
+    private List<ProductDTO> getTrendingProducts(int limit, List<ProductDTO> existing) {
+        try {
+            List<ProductDTO> trendingProducts = productService.getTopFeaturedProducts(limit + existing.size());
+
+            // Filter out already included products
+            Set<UUID> existingIds = existing.stream()
+                    .map(ProductDTO::getId)
+                    .collect(Collectors.toSet());
+
+            return trendingProducts.stream()
+                    .filter(p -> !existingIds.contains(p.getId()))
+                    .limit(limit)
+                    .toList();
+
+        } catch (Exception e) {
+            log.warn("Trending products strategy failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private String buildProductQuery(ProductDTO product) {
+        StringBuilder query = new StringBuilder();
+
+        if (product.getName() != null) {
+            query.append(product.getName()).append(" ");
+        }
+        if (product.getCategoryName() != null) {
+            query.append(product.getCategoryName()).append(" ");
+        }
+        if (product.getBrand() != null) {
+            query.append(product.getBrand());
+        }
+
+        return query.toString().trim();
+    }
+
+    private PriceRange getPriceRange(String pricePreference) {
+        if (pricePreference == null) {
+            return new PriceRange(null, null);
+        }
+
+        return switch (pricePreference) {
+            case "BUDGET" -> new PriceRange(0.0, 500.0);
+            case "MID_RANGE" -> new PriceRange(500.0, 2000.0);
+            case "PREMIUM" -> new PriceRange(2000.0, null);
+            default -> new PriceRange(null, null);
+        };
+    }
+
+    private List<ProductDTO> deduplicateAndLimit(List<ProductDTO> products, int limit) {
+        Map<UUID, ProductDTO> uniqueProducts = new LinkedHashMap<>();
+
+        for (ProductDTO product : products) {
+            if (product != null && product.getId() != null && !uniqueProducts.containsKey(product.getId())) {
+                uniqueProducts.put(product.getId(), product);
+            }
+            if (uniqueProducts.size() >= limit) {
+                break;
+            }
+        }
+
+        return new ArrayList<>(uniqueProducts.values());
+    }
+
+    private record PriceRange(Double min, Double max) {}
+}

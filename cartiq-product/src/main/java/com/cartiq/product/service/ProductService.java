@@ -16,6 +16,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
+
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -271,5 +273,54 @@ public class ProductService {
 
         productRepository.save(product);
         log.info("Product stock updated: id={}, newQuantity={}", id, newQuantity);
+    }
+
+    // ==================== SUGGESTIONS API METHODS ====================
+
+    /**
+     * Find top-rated products in specified categories within price range.
+     * Used for category affinity recommendation strategy.
+     *
+     * @param categoryNames List of category names to search
+     * @param minPrice Minimum price filter (nullable)
+     * @param maxPrice Maximum price filter (nullable)
+     * @param limit Maximum number of products to return
+     * @return List of top-rated products matching the criteria
+     */
+    @Transactional(readOnly = true)
+    public List<ProductDTO> findTopRatedByCategories(List<String> categoryNames,
+                                                      Double minPrice,
+                                                      Double maxPrice,
+                                                      int limit) {
+        if (categoryNames == null || categoryNames.isEmpty()) {
+            return List.of();
+        }
+
+        BigDecimal minPriceBd = minPrice != null ? BigDecimal.valueOf(minPrice) : null;
+        BigDecimal maxPriceBd = maxPrice != null ? BigDecimal.valueOf(maxPrice) : null;
+
+        return productRepository.findTopRatedByCategoryNames(
+                categoryNames,
+                minPriceBd,
+                maxPriceBd,
+                PageRequest.of(0, limit)
+        ).stream()
+                .map(ProductDTO::fromEntity)
+                .toList();
+    }
+
+    /**
+     * Get featured/trending products for cold start recommendations.
+     * Orders by featured flag, rating, and review count.
+     *
+     * @param limit Maximum number of products to return
+     * @return List of featured/trending products
+     */
+    @Transactional(readOnly = true)
+    public List<ProductDTO> getTopFeaturedProducts(int limit) {
+        return productRepository.findTopFeaturedProducts(PageRequest.of(0, limit))
+                .stream()
+                .map(ProductDTO::fromEntity)
+                .toList();
     }
 }

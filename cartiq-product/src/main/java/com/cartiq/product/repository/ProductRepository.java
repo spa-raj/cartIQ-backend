@@ -136,4 +136,26 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
      */
     @Query("SELECT p.sku FROM Product p WHERE p.sku IN :skus")
     Set<String> findExistingSkus(@Param("skus") Collection<String> skus);
+
+    /**
+     * Find top-rated products by category names with optional price filters.
+     * Used for suggestions based on category affinity.
+     */
+    @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
+           "AND p.category.name IN :categoryNames " +
+           "AND (:minPrice IS NULL OR p.price >= :minPrice) " +
+           "AND (:maxPrice IS NULL OR p.price <= :maxPrice) " +
+           "ORDER BY p.rating DESC NULLS LAST, p.reviewCount DESC NULLS LAST")
+    List<Product> findTopRatedByCategoryNames(@Param("categoryNames") List<String> categoryNames,
+                                               @Param("minPrice") BigDecimal minPrice,
+                                               @Param("maxPrice") BigDecimal maxPrice,
+                                               Pageable pageable);
+
+    /**
+     * Find top featured/trending products for cold start recommendations.
+     * Orders by featured flag, then rating, then review count.
+     */
+    @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
+           "ORDER BY p.featured DESC NULLS LAST, p.rating DESC NULLS LAST, p.reviewCount DESC NULLS LAST")
+    List<Product> findTopFeaturedProducts(Pageable pageable);
 }

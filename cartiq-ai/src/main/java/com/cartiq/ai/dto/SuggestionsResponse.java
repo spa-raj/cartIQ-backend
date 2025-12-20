@@ -1,0 +1,35 @@
+package com.cartiq.ai.dto;
+
+import com.cartiq.product.dto.ProductDTO;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Response DTO for personalized product suggestions.
+ */
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class SuggestionsResponse {
+
+    /** List of suggested products */
+    private List<ProductDTO> products;
+
+    /** Total number of products returned */
+    private int totalCount;
+
+    /** Whether the suggestions are personalized (user profile found) */
+    private boolean personalized;
+
+    /** Strategy name -> count of products from that strategy */
+    private Map<String, String> strategies;
+
+    /** User ID (null for anonymous users) */
+    private String userId;
+}
