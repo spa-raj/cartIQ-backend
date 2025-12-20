@@ -9,6 +9,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
 
+import jakarta.annotation.PostConstruct;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,6 +31,11 @@ public class UserProfileConsumer {
 
     @Value("${cartiq.suggestions.cache.prefix:user-profile:}")
     private String cachePrefix;
+
+    @PostConstruct
+    public void init() {
+        log.info("UserProfileConsumer initialized - listening to 'user-profiles' topic, caching to Redis with TTL={}h", cacheTtlHours);
+    }
 
     @KafkaListener(
             topics = "user-profiles",
@@ -51,10 +58,11 @@ public class UserProfileConsumer {
                     Duration.ofHours(cacheTtlHours)
             );
 
-            log.debug("Cached user profile for userId={}, categories={}, pricePreference={}",
+            log.info("Cached user profile: userId={}, categories={}, pricePreference={}, aiSearchCount={}",
                     event.getUserId(),
                     event.getRecentCategories(),
-                    event.getPricePreference()
+                    event.getPricePreference(),
+                    event.getAiSearchCount()
             );
 
         } catch (Exception e) {
