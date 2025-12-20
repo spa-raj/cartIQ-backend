@@ -4,6 +4,7 @@ import com.cartiq.kafka.dto.UserProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -38,21 +39,37 @@ public class UserProfileConsumer {
         log.info("UserProfileConsumer initialized - listening to 'user-profiles' topic, caching to Redis with TTL={}h", cacheTtlHours);
     }
 
+    /**
+     * Consumes user profile events from Flink.
+     * Flink uses upsert mode with composite keys, so:
+     * - Key contains: userId, sessionId, windowBucket (primary keys)
+     * - Value contains: all other fields
+     */
     @KafkaListener(
             topics = "user-profiles",
             groupId = "cartiq-suggestions-consumer",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void consumeUserProfile(GenericRecord record) {
+    public void consumeUserProfile(ConsumerRecord<GenericRecord, GenericRecord> consumerRecord) {
         try {
-            String userId = getStringField(record, "userId");
+            GenericRecord key = consumerRecord.key();
+            GenericRecord value = consumerRecord.value();
+
+            // Handle tombstone messages (value is null for deletes in upsert mode)
+            if (value == null) {
+                log.debug("Received tombstone message for key: {}", key);
+                return;
+            }
+
+            // Extract userId from the KEY (not value)
+            String userId = getStringField(key, "userId");
             if (userId == null || userId.isBlank()) {
-                log.warn("Received user profile event with null userId, skipping");
+                log.warn("Received user profile event with null userId in key, skipping");
                 return;
             }
 
             String cacheKey = cachePrefix + userId;
-            UserProfile profile = mapToUserProfile(record);
+            UserProfile profile = mapToUserProfile(key, value);
 
             redisTemplate.opsForValue().set(
                     cacheKey,
@@ -77,35 +94,38 @@ public class UserProfileConsumer {
 
     /**
      * Maps GenericRecord from Flink-produced Avro to UserProfile DTO.
-     * Field names match the Flink SQL schema in docs/flink-sql/02-user-profiles.sql
+     * Key contains: userId, sessionId, windowBucket
+     * Value contains: all other fields
      */
-    private UserProfile mapToUserProfile(GenericRecord record) {
+    private UserProfile mapToUserProfile(GenericRecord key, GenericRecord value) {
         return UserProfile.builder()
-                .userId(getStringField(record, "userId"))
-                .sessionId(getStringField(record, "sessionId"))
+                // From KEY (primary keys)
+                .userId(getStringField(key, "userId"))
+                .sessionId(getStringField(key, "sessionId"))
+                // From VALUE (all other fields)
                 // Product activity
-                .recentProductIds(getStringList(record, "recentProductIds"))
-                .recentCategories(getStringList(record, "recentCategories"))
-                .recentSearchQueries(getStringList(record, "recentSearchQueries"))
-                .totalProductViews(getLongField(record, "totalProductViews"))
-                .avgViewDurationMs(getLongField(record, "avgViewDurationMs"))
-                .avgProductPrice(getDoubleField(record, "avgProductPrice"))
+                .recentProductIds(getStringList(value, "recentProductIds"))
+                .recentCategories(getStringList(value, "recentCategories"))
+                .recentSearchQueries(getStringList(value, "recentSearchQueries"))
+                .totalProductViews(getLongField(value, "totalProductViews"))
+                .avgViewDurationMs(getLongField(value, "avgViewDurationMs"))
+                .avgProductPrice(getDoubleField(value, "avgProductPrice"))
                 // Cart state
-                .totalCartAdds(getLongField(record, "totalCartAdds"))
-                .currentCartTotal(getDoubleField(record, "currentCartTotal"))
-                .currentCartItems(getLongField(record, "currentCartItems"))
+                .totalCartAdds(getLongField(value, "totalCartAdds"))
+                .currentCartTotal(getDoubleField(value, "currentCartTotal"))
+                .currentCartItems(getLongField(value, "currentCartItems"))
                 // Session info
-                .deviceType(getStringField(record, "deviceType"))
-                .sessionDurationMs(getLongField(record, "sessionDurationMs"))
+                .deviceType(getStringField(value, "deviceType"))
+                .sessionDurationMs(getLongField(value, "sessionDurationMs"))
                 // Preferences
-                .pricePreference(getStringField(record, "pricePreference"))
+                .pricePreference(getStringField(value, "pricePreference"))
                 // AI intent signals
-                .aiSearchCount(getLongField(record, "aiSearchCount"))
-                .aiSearchQueries(getStringList(record, "aiSearchQueries"))
-                .aiSearchCategories(getStringList(record, "aiSearchCategories"))
-                .aiMaxBudget(getDoubleField(record, "aiMaxBudget"))
-                .aiProductSearches(getLongField(record, "aiProductSearches"))
-                .aiProductComparisons(getLongField(record, "aiProductComparisons"))
+                .aiSearchCount(getLongField(value, "aiSearchCount"))
+                .aiSearchQueries(getStringList(value, "aiSearchQueries"))
+                .aiSearchCategories(getStringList(value, "aiSearchCategories"))
+                .aiMaxBudget(getDoubleField(value, "aiMaxBudget"))
+                .aiProductSearches(getLongField(value, "aiProductSearches"))
+                .aiProductComparisons(getLongField(value, "aiProductComparisons"))
                 // Metadata
                 .lastUpdated(LocalDateTime.now())
                 .build();

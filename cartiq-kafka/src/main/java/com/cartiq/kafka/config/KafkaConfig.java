@@ -9,7 +9,6 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
-import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -120,15 +119,17 @@ public class KafkaConfig {
      * Consumer factory for GenericRecord deserialization.
      * Used for consuming Flink-produced Avro messages where the schema
      * uses Flink's generated class namespace.
+     * Both key and value are deserialized as GenericRecord since Flink
+     * puts primary key fields (userId, sessionId) in the key.
      */
     @Bean
-    public ConsumerFactory<String, GenericRecord> consumerFactory() {
+    public ConsumerFactory<GenericRecord, GenericRecord> consumerFactory() {
         Map<String, Object> props = new HashMap<>(commonConfigs());
         props.putAll(schemaRegistryConfigs());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        // Use KafkaAvroDeserializer with GenericRecord for Flink-produced messages
+        // Use KafkaAvroDeserializer for BOTH key and value (Flink uses Avro for keys too)
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, KafkaAvroDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaAvroDeserializer.class);
         // IMPORTANT: Set to false to get GenericRecord instead of specific Avro class
         props.put(KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, false);
@@ -137,9 +138,9 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, GenericRecord> kafkaListenerContainerFactory(
-            ConsumerFactory<String, GenericRecord> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, GenericRecord> factory =
+    public ConcurrentKafkaListenerContainerFactory<GenericRecord, GenericRecord> kafkaListenerContainerFactory(
+            ConsumerFactory<GenericRecord, GenericRecord> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<GenericRecord, GenericRecord> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(3);
