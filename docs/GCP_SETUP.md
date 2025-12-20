@@ -38,12 +38,14 @@ gcloud services enable \
   compute.googleapis.com \
   servicenetworking.googleapis.com \
   cloudresourcemanager.googleapis.com \
-  secretmanager.googleapis.com
+  secretmanager.googleapis.com \
+  vpcaccess.googleapis.com \
+  run.googleapis.com
 ```
 
 **Verify APIs are enabled:**
 ```bash
-gcloud services list --enabled | grep -E "(aiplatform|redis|compute|secretmanager)"
+gcloud services list --enabled | grep -E "(aiplatform|redis|compute|secretmanager|vpcaccess|run)"
 ```
 
 ---
@@ -252,12 +254,14 @@ gcloud services vpc-peerings connect \
 
 ## 5. Create Cloud Memorystore Redis Instance
 
+### Step 5.1: Create Redis Instance
+
 ```bash
-# Create Redis instance (Basic tier, 1GB)
+# Create Redis instance (Basic tier, 1GB, Redis 7.2)
 gcloud redis instances create cartiq-cache \
   --size=1 \
   --region=$REGION \
-  --redis-version=redis_7_0 \
+  --redis-version=redis_7_2 \
   --network=default \
   --tier=basic
 
@@ -265,7 +269,30 @@ gcloud redis instances create cartiq-cache \
 echo "Creating Redis instance... (wait 3-5 minutes)"
 ```
 
-**Get Redis connection details:**
+### Step 5.2: Configure Eviction Policy
+
+Set the eviction policy to `volatile-lru` for optimal cache behavior with TTL-based keys:
+
+```bash
+# Update Redis with recommended eviction policy
+gcloud redis instances update cartiq-cache \
+  --region=$REGION \
+  --update-redis-config=maxmemory-policy=volatile-lru
+
+echo "Eviction policy set to volatile-lru"
+```
+
+**Eviction Policy Options:**
+
+| Policy | Description | Use Case |
+|--------|-------------|----------|
+| `volatile-lru` | Evict LRU keys among those with TTL | ✅ **Recommended** - Best for user profile caching |
+| `allkeys-lru` | Evict LRU keys from all keys | Good general purpose |
+| `volatile-ttl` | Evict keys with shortest TTL first | When TTL reflects priority |
+| `noeviction` | Return error when memory full | When data loss is unacceptable |
+
+### Step 5.3: Get Redis Connection Details
+
 ```bash
 # Get Redis host IP
 gcloud redis instances describe cartiq-cache --region=$REGION --format="value(host)"
@@ -273,7 +300,7 @@ gcloud redis instances describe cartiq-cache --region=$REGION --format="value(ho
 # Get Redis port (default: 6379)
 gcloud redis instances describe cartiq-cache --region=$REGION --format="value(port)"
 
-# Full connection info
+# Full connection info (verify config)
 gcloud redis instances describe cartiq-cache --region=$REGION
 ```
 
@@ -285,6 +312,94 @@ export REDIS_PORT=$(gcloud redis instances describe cartiq-cache --region=$REGIO
 echo "REDIS_HOST=$REDIS_HOST"
 echo "REDIS_PORT=$REDIS_PORT"
 ```
+
+### Step 5.4: Verify Redis Configuration
+
+```bash
+# Check Redis instance details
+gcloud redis instances describe cartiq-cache \
+  --region=$REGION \
+  --format="table(name,host,port,memorySizeGb,redisVersion,redisConfigs)"
+```
+
+Expected output:
+```
+NAME          HOST           PORT  MEMORY_SIZE_GB  REDIS_VERSION  REDIS_CONFIGS
+cartiq-cache  10.143.43.75   6379  1               REDIS_7_2      {'maxmemory-policy': 'volatile-lru'}
+```
+
+> **Note:** Redis is deployed with a private IP. Cloud Run needs a VPC connector to access it (see Section 5.5).
+
+### Step 5.5: Create VPC Connector for Cloud Run
+
+Cloud Run is serverless and runs outside your VPC by default. To connect to the private Redis instance, you need a VPC Access Connector.
+
+```bash
+# Enable the VPC Access API (if not already enabled)
+gcloud services enable vpcaccess.googleapis.com
+
+# Create VPC connector
+gcloud compute networks vpc-access connectors create cartiq-connector \
+  --region=$REGION \
+  --network=default \
+  --range=10.8.0.0/28 \
+  --min-instances=2 \
+  --max-instances=3 \
+  --machine-type=e2-micro
+
+# This takes 2-3 minutes...
+echo "Creating VPC connector... (wait 2-3 minutes)"
+```
+
+**Verify VPC Connector:**
+```bash
+# Check connector status (should be READY)
+gcloud compute networks vpc-access connectors describe cartiq-connector \
+  --region=$REGION \
+  --format="table(name,state,network,ipCidrRange)"
+```
+
+Expected output:
+```
+NAME              STATE  NETWORK  IP_CIDR_RANGE
+cartiq-connector  READY  default  10.8.0.0/28
+```
+
+### Step 5.6: Deploy Cloud Run with VPC Connector
+
+When deploying to Cloud Run, include the VPC connector flags:
+
+```bash
+gcloud run deploy cartiq-backend \
+  --image=gcr.io/${PROJECT_ID}/cartiq-backend \
+  --region=$REGION \
+  --vpc-connector=cartiq-connector \
+  --vpc-egress=private-ranges-only \
+  --set-env-vars="REDIS_HOST=${REDIS_HOST}" \
+  --set-env-vars="REDIS_PORT=6379" \
+  # ... other flags
+```
+
+**VPC Egress Options:**
+
+| Option | Description |
+|--------|-------------|
+| `private-ranges-only` | ✅ **Recommended** - Only private IP traffic uses VPC |
+| `all-traffic` | All outbound traffic routes through VPC |
+
+### Step 5.7: Store Redis Host in GitHub Secrets
+
+For CI/CD deployment, add the Redis host to GitHub secrets:
+
+```bash
+# Get the Redis host IP
+REDIS_HOST=$(gcloud redis instances describe cartiq-cache --region=$REGION --format="value(host)")
+echo "Add this to GitHub Secrets as REDIS_HOST: $REDIS_HOST"
+```
+
+In GitHub → Repository Settings → Secrets and variables → Actions:
+- Add secret: `REDIS_HOST` = `10.x.x.x` (your Redis private IP)
+- Add variable: `REDIS_PORT` = `6379`
 
 ---
 
@@ -824,6 +939,13 @@ echo ".env file created!"
 ## 12. Cleanup (After Hackathon)
 
 ```bash
+# Delete Cloud Run service
+gcloud run services delete cartiq-backend --region=$REGION --quiet
+
+# Delete VPC Connector
+gcloud compute networks vpc-access connectors delete cartiq-connector \
+  --region=$REGION --quiet
+
 # Delete Vector Search resources
 gcloud ai index-endpoints undeploy-index $INDEX_ENDPOINT_ID \
   --deployed-index-id="cartiq_products_deployed" \
@@ -836,7 +958,7 @@ gcloud ai indexes delete $INDEX_ID --region=$REGION
 gcloud sql instances delete cartiq-db --quiet
 
 # Delete Redis
-gcloud redis instances delete cartiq-cache --region=$REGION
+gcloud redis instances delete cartiq-cache --region=$REGION --quiet
 
 # Delete GCS buckets
 gcloud storage rm -r gs://${BUCKET_NAME}
@@ -860,15 +982,84 @@ echo "Cleanup complete!"
 ## Troubleshooting
 
 ### Redis Connection Issues
-```bash
-# Check if Redis is in the same VPC as your application
-gcloud redis instances describe cartiq-cache --region=$REGION --format="value(authorizedNetwork)"
 
-# For Cloud Run, you need Serverless VPC Access
+**Problem: Cloud Run cannot connect to Redis**
+
+1. **Verify VPC Connector exists and is READY:**
+```bash
+gcloud compute networks vpc-access connectors describe cartiq-connector \
+  --region=$REGION \
+  --format="table(name,state,network)"
+```
+
+2. **If connector is in ERROR state, recreate it:**
+```bash
+# Delete broken connector
+gcloud compute networks vpc-access connectors delete cartiq-connector \
+  --region=$REGION --quiet
+
+# Create new connector with different IP range
 gcloud compute networks vpc-access connectors create cartiq-connector \
   --region=$REGION \
   --network=default \
-  --range=10.8.0.0/28
+  --range=10.8.0.0/28 \
+  --min-instances=2 \
+  --max-instances=3 \
+  --machine-type=e2-micro
+```
+
+3. **Verify Cloud Run is using the VPC connector:**
+```bash
+gcloud run services describe cartiq-backend \
+  --region=$REGION \
+  --format="value(spec.template.metadata.annotations['run.googleapis.com/vpc-access-connector'])"
+```
+
+4. **Check Redis is on the same network:**
+```bash
+# Redis network
+gcloud redis instances describe cartiq-cache --region=$REGION --format="value(authorizedNetwork)"
+
+# VPC connector network (should match)
+gcloud compute networks vpc-access connectors describe cartiq-connector \
+  --region=$REGION --format="value(network)"
+```
+
+**Problem: Redis connection timeout**
+
+```bash
+# Verify Redis is READY
+gcloud redis instances describe cartiq-cache --region=$REGION --format="value(state)"
+
+# Check Redis host is correct in environment
+gcloud redis instances describe cartiq-cache --region=$REGION --format="value(host)"
+```
+
+### VPC Connector Issues
+
+**Problem: VPC Connector stuck in ERROR state**
+
+Common causes:
+- IP range conflict with existing subnets
+- Insufficient quota for e2-micro instances
+
+```bash
+# Check for IP range conflicts
+gcloud compute networks subnets list --network=default --format="table(name,ipCidrRange)"
+
+# Try a different IP range (avoid 10.128.x.x which is used by default subnets)
+gcloud compute networks vpc-access connectors create cartiq-connector \
+  --region=$REGION \
+  --network=default \
+  --range=10.9.0.0/28  # Different range
+```
+
+**Problem: VPC Connector quota exceeded**
+
+```bash
+# Check VPC access connector quota
+gcloud compute regions describe $REGION \
+  --format="table(quotas.filter(metric='VPC_ACCESS_CONNECTORS'))"
 ```
 
 ### Vector Search "Index Not Ready"
@@ -894,11 +1085,24 @@ gcloud projects get-iam-policy $PROJECT_ID \
 | Resource | Command to Get Details |
 |----------|------------------------|
 | Redis Host | `gcloud redis instances describe cartiq-cache --region=$REGION --format="value(host)"` |
+| Redis Config | `gcloud redis instances describe cartiq-cache --region=$REGION --format="value(redisConfigs)"` |
+| VPC Connector | `gcloud compute networks vpc-access connectors describe cartiq-connector --region=$REGION` |
 | Index ID | `gcloud ai indexes list --region=$REGION --format="value(name)"` |
 | Endpoint ID | `gcloud ai index-endpoints list --region=$REGION --format="value(name)"` |
 | Project ID | `gcloud config get-value project` |
 | Batch Indexing Bucket | `gcloud storage buckets describe gs://cartiq-indexing-data` |
 
+### Current Infrastructure (CartIQ)
+
+| Resource | Value |
+|----------|-------|
+| Redis Instance | `cartiq-cache` |
+| Redis Version | 7.2 |
+| Redis Host | `10.143.43.75` |
+| Redis Eviction Policy | `volatile-lru` |
+| VPC Connector | `cartiq-connector` |
+| VPC Connector IP Range | `10.8.0.0/28` |
+
 ---
 
-*Last updated: December 19, 2025*
+*Last updated: December 20, 2025*

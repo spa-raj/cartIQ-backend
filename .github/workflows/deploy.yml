@@ -88,6 +88,8 @@ jobs:
             --timeout=300
             --cpu-boost
             --add-cloudsql-instances=${{ secrets.GCP_PROJECT_ID }}:${{ env.REGION }}:${{ vars.CLOUD_SQL_INSTANCE_NAME || 'cartiq-db' }}
+            --vpc-connector=projects/${{ secrets.GCP_PROJECT_ID }}/locations/${{ env.REGION }}/connectors/cartiq-connector
+            --vpc-egress=private-ranges-only
           env_vars: |
             JAVA_TOOL_OPTIONS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
             SPRING_PROFILES_ACTIVE=prod
