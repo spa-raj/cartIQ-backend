@@ -8,12 +8,11 @@ import org.springframework.data.redis.serializer.GenericJacksonJsonRedisSerializ
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.datatype.jsr310.JavaTimeModule;
 
 /**
  * Redis configuration for user profile caching.
  * Uses Jackson 3 JSON serialization for Spring Boot 4.0 compatibility.
- * Jackson 3 defaults to ISO-8601 date format (no timestamps).
+ * Jackson 3.0.2+ has built-in JSR-310 (java.time) support and defaults to ISO-8601 format.
  */
 @Configuration
 public class RedisConfig {
@@ -27,13 +26,9 @@ public class RedisConfig {
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
 
-        // Use Jackson 3 JSON serializer with Java 8 date/time support
-        ObjectMapper objectMapper = JsonMapper.builder()
-                .addModule(new JavaTimeModule())
-                .build();
-
-        GenericJacksonJsonRedisSerializer jsonSerializer =
-                new GenericJacksonJsonRedisSerializer(objectMapper);
+        // Use Jackson 3 JSON serializer (built-in java.time support in 3.0.2+)
+        ObjectMapper objectMapper = JsonMapper.builder().build();
+        GenericJacksonJsonRedisSerializer jsonSerializer = new GenericJacksonJsonRedisSerializer(objectMapper);
 
         template.setValueSerializer(jsonSerializer);
         template.setHashValueSerializer(jsonSerializer);
