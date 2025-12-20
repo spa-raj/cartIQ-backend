@@ -1,9 +1,9 @@
 package com.cartiq.kafka.consumer;
 
-import com.cartiq.kafka.dto.KafkaEvents.UserProfileUpdateEvent;
 import com.cartiq.kafka.dto.UserProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.avro.generic.GenericRecord;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -13,6 +13,7 @@ import jakarta.annotation.PostConstruct;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,15 +43,16 @@ public class UserProfileConsumer {
             groupId = "cartiq-suggestions-consumer",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void consumeUserProfile(UserProfileUpdateEvent event) {
+    public void consumeUserProfile(GenericRecord record) {
         try {
-            if (event.getUserId() == null || event.getUserId().isBlank()) {
+            String userId = getStringField(record, "userId");
+            if (userId == null || userId.isBlank()) {
                 log.warn("Received user profile event with null userId, skipping");
                 return;
             }
 
-            String cacheKey = cachePrefix + event.getUserId();
-            UserProfile profile = mapToUserProfile(event);
+            String cacheKey = cachePrefix + userId;
+            UserProfile profile = mapToUserProfile(record);
 
             redisTemplate.opsForValue().set(
                     cacheKey,
@@ -59,54 +61,90 @@ public class UserProfileConsumer {
             );
 
             log.info("Cached user profile: userId={}, categories={}, pricePreference={}, aiSearchCount={}",
-                    event.getUserId(),
-                    event.getRecentCategories(),
-                    event.getPricePreference(),
-                    event.getAiSearchCount()
+                    profile.getUserId(),
+                    profile.getRecentCategories(),
+                    profile.getPricePreference(),
+                    profile.getAiSearchCount()
             );
 
         } catch (Exception e) {
-            log.error("Failed to process user profile event for userId={}: {}",
-                    event != null ? event.getUserId() : "null",
+            log.error("Failed to process user profile event: {}",
                     e.getMessage(),
                     e
             );
         }
     }
 
-    private UserProfile mapToUserProfile(UserProfileUpdateEvent event) {
+    /**
+     * Maps GenericRecord from Flink-produced Avro to UserProfile DTO.
+     * Field names match the Flink SQL schema in docs/flink-sql/02-user-profiles.sql
+     */
+    private UserProfile mapToUserProfile(GenericRecord record) {
         return UserProfile.builder()
-                .userId(event.getUserId())
-                .sessionId(event.getSessionId())
+                .userId(getStringField(record, "userId"))
+                .sessionId(getStringField(record, "sessionId"))
                 // Product activity
-                .recentProductIds(nullSafeList(event.getRecentProductIds()))
-                .recentCategories(nullSafeList(event.getRecentCategories()))
-                .recentSearchQueries(nullSafeList(event.getRecentSearchQueries()))
-                .totalProductViews(event.getTotalProductViews())
-                .avgViewDurationMs(event.getAvgViewDurationMs())
-                .avgProductPrice(event.getAvgProductPrice())
+                .recentProductIds(getStringList(record, "recentProductIds"))
+                .recentCategories(getStringList(record, "recentCategories"))
+                .recentSearchQueries(getStringList(record, "recentSearchQueries"))
+                .totalProductViews(getLongField(record, "totalProductViews"))
+                .avgViewDurationMs(getLongField(record, "avgViewDurationMs"))
+                .avgProductPrice(getDoubleField(record, "avgProductPrice"))
                 // Cart state
-                .totalCartAdds(event.getTotalCartAdds())
-                .currentCartTotal(event.getCurrentCartTotal())
-                .currentCartItems(event.getCurrentCartItems())
+                .totalCartAdds(getLongField(record, "totalCartAdds"))
+                .currentCartTotal(getDoubleField(record, "currentCartTotal"))
+                .currentCartItems(getLongField(record, "currentCartItems"))
                 // Session info
-                .deviceType(event.getDeviceType())
-                .sessionDurationMs(event.getSessionDurationMs())
+                .deviceType(getStringField(record, "deviceType"))
+                .sessionDurationMs(getLongField(record, "sessionDurationMs"))
                 // Preferences
-                .pricePreference(event.getPricePreference())
+                .pricePreference(getStringField(record, "pricePreference"))
                 // AI intent signals
-                .aiSearchCount(event.getAiSearchCount())
-                .aiSearchQueries(nullSafeList(event.getAiSearchQueries()))
-                .aiSearchCategories(nullSafeList(event.getAiSearchCategories()))
-                .aiMaxBudget(event.getAiMaxBudget())
-                .aiProductSearches(event.getAiProductSearches())
-                .aiProductComparisons(event.getAiProductComparisons())
+                .aiSearchCount(getLongField(record, "aiSearchCount"))
+                .aiSearchQueries(getStringList(record, "aiSearchQueries"))
+                .aiSearchCategories(getStringList(record, "aiSearchCategories"))
+                .aiMaxBudget(getDoubleField(record, "aiMaxBudget"))
+                .aiProductSearches(getLongField(record, "aiProductSearches"))
+                .aiProductComparisons(getLongField(record, "aiProductComparisons"))
                 // Metadata
                 .lastUpdated(LocalDateTime.now())
                 .build();
     }
 
-    private List<String> nullSafeList(List<String> list) {
-        return list != null ? list : List.of();
+    private String getStringField(GenericRecord record, String fieldName) {
+        Object value = record.get(fieldName);
+        return value != null ? value.toString() : null;
+    }
+
+    private Long getLongField(GenericRecord record, String fieldName) {
+        Object value = record.get(fieldName);
+        if (value == null) return 0L;
+        if (value instanceof Long) return (Long) value;
+        if (value instanceof Number) return ((Number) value).longValue();
+        return 0L;
+    }
+
+    private Double getDoubleField(GenericRecord record, String fieldName) {
+        Object value = record.get(fieldName);
+        if (value == null) return 0.0;
+        if (value instanceof Double) return (Double) value;
+        if (value instanceof Number) return ((Number) value).doubleValue();
+        return 0.0;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> getStringList(GenericRecord record, String fieldName) {
+        Object value = record.get(fieldName);
+        if (value == null) return List.of();
+        if (value instanceof List<?> list) {
+            List<String> result = new ArrayList<>();
+            for (Object item : list) {
+                if (item != null) {
+                    result.add(item.toString());
+                }
+            }
+            return result;
+        }
+        return List.of();
     }
 }

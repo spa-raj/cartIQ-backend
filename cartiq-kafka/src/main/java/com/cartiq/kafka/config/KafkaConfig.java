@@ -1,9 +1,10 @@
 package com.cartiq.kafka.config;
 
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
 import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
-import io.confluent.kafka.streams.serdes.avro.ReflectionAvroDeserializer;
 import io.confluent.kafka.streams.serdes.avro.ReflectionAvroSerializer;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -115,24 +116,30 @@ public class KafkaConfig {
 
     // ==================== CONSUMER CONFIG ====================
 
+    /**
+     * Consumer factory for GenericRecord deserialization.
+     * Used for consuming Flink-produced Avro messages where the schema
+     * uses Flink's generated class namespace.
+     */
     @Bean
-    public ConsumerFactory<String, Object> consumerFactory() {
+    public ConsumerFactory<String, GenericRecord> consumerFactory() {
         Map<String, Object> props = new HashMap<>(commonConfigs());
         props.putAll(schemaRegistryConfigs());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        // Use ReflectionAvroDeserializer for POJO deserialization
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ReflectionAvroDeserializer.class);
+        // Use KafkaAvroDeserializer with GenericRecord for Flink-produced messages
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, KafkaAvroDeserializer.class);
+        // IMPORTANT: Set to false to get GenericRecord instead of specific Avro class
         props.put(KafkaAvroDeserializerConfig.SPECIFIC_AVRO_READER_CONFIG, false);
 
         return new DefaultKafkaConsumerFactory<>(props);
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
-            ConsumerFactory<String, Object> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, Object> factory =
+    public ConcurrentKafkaListenerContainerFactory<String, GenericRecord> kafkaListenerContainerFactory(
+            ConsumerFactory<String, GenericRecord> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<String, GenericRecord> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(3);
