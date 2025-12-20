@@ -231,21 +231,55 @@ public class KafkaEvents {
         private String reason;
     }
 
-    // ==================== USER PROFILE EVENTS ====================
+    // ==================== USER PROFILE EVENTS (from Flink user-profiles topic) ====================
 
+    /**
+     * User profile update event from Flink's user-profiles topic.
+     * Contains aggregated user behavior for personalization.
+     * Schema matches docs/flink-sql/02-user-profiles.sql output.
+     */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class UserProfileUpdateEvent {
-        private String eventId;
+        // Primary keys
         private String userId;
-        private List<String> topCategories;
-        private String pricePreference;
-        private Integer totalOrders;
-        private Double totalSpent;
-        private Integer sessionCount;
-        private String lastActive;      // ISO-8601 format for Avro
-        private String timestamp;       // ISO-8601 format for Avro
+        private String sessionId;
+        private String windowBucket;
+
+        // Metadata
+        private String eventId;
+        private String windowStart;
+        private String windowEnd;
+        private String lastUpdated;             // ISO-8601 format
+
+        // Product activity
+        private List<String> recentProductIds;
+        private List<String> recentCategories;
+        private List<String> recentSearchQueries;
+        private Long totalProductViews;
+        private Long avgViewDurationMs;
+        private Double avgProductPrice;
+
+        // Cart state
+        private Long totalCartAdds;
+        private Double currentCartTotal;
+        private Long currentCartItems;
+
+        // Session info
+        private Long sessionDurationMs;
+        private String deviceType;
+
+        // Computed preference
+        private String pricePreference;         // BUDGET, MID_RANGE, PREMIUM
+
+        // AI search activity (strong intent signals from chat)
+        private Long aiSearchCount;
+        private List<String> aiSearchQueries;
+        private List<String> aiSearchCategories;
+        private Double aiMaxBudget;
+        private Long aiProductSearches;
+        private Long aiProductComparisons;
     }
 }
