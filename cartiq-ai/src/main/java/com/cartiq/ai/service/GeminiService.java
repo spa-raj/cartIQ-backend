@@ -567,14 +567,11 @@ public class GeminiService {
             // This captures what user actually found, not what Gemini guessed
             String effectiveCategory = category;
             if ((effectiveCategory == null || effectiveCategory.isBlank()) && !products.isEmpty()) {
-                // Use the most common category from top results (up to first 3)
-                effectiveCategory = products.stream()
-                        .limit(3)
-                        .map(ProductDTO::getCategoryName)
-                        .filter(c -> c != null && !c.isBlank())
-                        .findFirst()
-                        .orElse("");
-                log.debug("Inferred category '{}' from search results", effectiveCategory);
+                // Use the MOST COMMON category from top N products (not just the first one)
+                // This is more robust against a few irrelevant results from vector search
+                effectiveCategory = inferMostCommonCategory(products, 10);
+                log.info("Inferred category '{}' from {} search results (most common from top 10)",
+                        effectiveCategory, products.size());
             }
 
             // Build AI search event with all fields populated
@@ -608,6 +605,41 @@ public class GeminiService {
     }
 
     // ==================== Helper Methods ====================
+
+    /**
+     * Infer the most common category from a list of products.
+     * More robust than taking the first category - handles cases where
+     * vector search returns a few irrelevant products mixed in.
+     *
+     * @param products List of products to analyze
+     * @param limit    Maximum number of products to consider
+     * @return Most common category name, or empty string if none found
+     */
+    private String inferMostCommonCategory(List<ProductDTO> products, int limit) {
+        if (products == null || products.isEmpty()) {
+            return "";
+        }
+
+        // Count category occurrences from top N products
+        Map<String, Long> categoryCounts = products.stream()
+                .limit(limit)
+                .map(ProductDTO::getCategoryName)
+                .filter(c -> c != null && !c.isBlank())
+                .collect(java.util.stream.Collectors.groupingBy(
+                        c -> c,
+                        java.util.stream.Collectors.counting()
+                ));
+
+        if (categoryCounts.isEmpty()) {
+            return "";
+        }
+
+        // Find the most common category
+        return categoryCounts.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse("");
+    }
 
     private Double toDouble(Object value) {
         if (value == null) return null;

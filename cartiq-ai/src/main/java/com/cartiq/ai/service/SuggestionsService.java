@@ -202,9 +202,17 @@ public class SuggestionsService {
     }
 
     private boolean hasAIIntent(UserProfile profile) {
-        return (profile.getAiSearchCategories() != null && !profile.getAiSearchCategories().isEmpty()
-                && !profile.getAiSearchCategories().stream().allMatch(String::isBlank))
+        // Consider AI intent present if we have ANY category signals or budget
+        // This includes: AI search categories, cart categories, or recent categories
+        return hasValidCategories(profile.getAiSearchCategories())
+                || hasValidCategories(profile.getCartCategories())
+                || hasValidCategories(profile.getRecentCategories())
                 || (profile.getAiMaxBudget() != null && profile.getAiMaxBudget() > 0);
+    }
+
+    private boolean hasValidCategories(List<String> categories) {
+        return categories != null && !categories.isEmpty()
+                && !categories.stream().allMatch(c -> c == null || c.isBlank());
     }
 
     private boolean hasRecentViews(UserProfile profile) {
@@ -220,23 +228,60 @@ public class SuggestionsService {
      * Strategy 1: AI Intent Products
      * Uses explicit signals from AI chat (category, budget).
      * Searches each category separately for better semantic matching.
+     *
+     * Category priority:
+     * 1. AI search categories (strongest - explicit queries)
+     * 2. Cart categories (strong - items user is considering)
+     * 3. Recent categories (moderate - items user browsed)
      */
     private List<SuggestedProduct> getAIIntentProducts(UserProfile profile, int limit) {
         try {
-            List<String> categories = profile.getAiSearchCategories();
             Double maxBudget = profile.getAiMaxBudget();
 
-            if (categories == null || categories.isEmpty()) {
+            // Combine categories from all sources with priority ordering
+            // AI search categories first (strongest signal), then cart, then recent
+            List<String> combinedCategories = new ArrayList<>();
+
+            // Priority 1: AI search categories (explicit queries)
+            if (profile.getAiSearchCategories() != null) {
+                profile.getAiSearchCategories().stream()
+                        .filter(c -> c != null && !c.isBlank())
+                        .forEach(combinedCategories::add);
+            }
+
+            // Priority 2: Cart categories (items being considered)
+            if (profile.getCartCategories() != null) {
+                profile.getCartCategories().stream()
+                        .filter(c -> c != null && !c.isBlank())
+                        .filter(c -> !combinedCategories.contains(c)) // Avoid duplicates
+                        .forEach(combinedCategories::add);
+            }
+
+            // Priority 3: Recent categories (browsed items)
+            if (profile.getRecentCategories() != null) {
+                profile.getRecentCategories().stream()
+                        .filter(c -> c != null && !c.isBlank())
+                        .filter(c -> !combinedCategories.contains(c)) // Avoid duplicates
+                        .forEach(combinedCategories::add);
+            }
+
+            if (combinedCategories.isEmpty()) {
+                log.debug("No valid categories found from any source");
                 return List.of();
             }
 
-            // Filter valid categories - limit to top 3 to avoid API quota issues
-            // Most recent categories (first in list) have highest intent signal
-            List<String> validCategories = categories.stream()
-                    .filter(c -> c != null && !c.isBlank())
+            // Limit to top 4 categories to manage API quota
+            // Most recent/important categories are first
+            List<String> validCategories = combinedCategories.stream()
                     .distinct()
-                    .limit(3)  // Top 3 categories only to manage API quota
+                    .limit(4)
                     .toList();
+
+            log.info("AI intent using combined categories: {} (from ai={}, cart={}, recent={})",
+                    validCategories,
+                    profile.getAiSearchCategories() != null ? profile.getAiSearchCategories().size() : 0,
+                    profile.getCartCategories() != null ? profile.getCartCategories().size() : 0,
+                    profile.getRecentCategories() != null ? profile.getRecentCategories().size() : 0);
 
             if (validCategories.isEmpty()) {
                 return List.of();
