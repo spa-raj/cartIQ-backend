@@ -297,7 +297,11 @@ public class GeminiService {
                     Double maxPrice = toDouble(args.get("maxPrice"));
                     Double minRating = toDouble(args.get("minRating"));
 
+                    log.info("searchProducts params: query='{}', category='{}', minPrice={}, maxPrice={}, minRating={}",
+                            query, category, minPrice, maxPrice, minRating);
+
                     products = productToolService.executeSearchProducts(query, category, minPrice, maxPrice, minRating);
+                    log.info("searchProducts returned {} products", products.size());
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
 
@@ -559,6 +563,20 @@ public class GeminiService {
             long startTime) {
 
         try {
+            // Infer category from actual search results if not provided
+            // This captures what user actually found, not what Gemini guessed
+            String effectiveCategory = category;
+            if ((effectiveCategory == null || effectiveCategory.isBlank()) && !products.isEmpty()) {
+                // Use the most common category from top results (up to first 3)
+                effectiveCategory = products.stream()
+                        .limit(3)
+                        .map(ProductDTO::getCategoryName)
+                        .filter(c -> c != null && !c.isBlank())
+                        .findFirst()
+                        .orElse("");
+                log.debug("Inferred category '{}' from search results", effectiveCategory);
+            }
+
             // Build AI search event with all fields populated
             // Primitive types ensure non-null values for Avro schema
             AISearchEvent event = AISearchEvent.builder()
@@ -568,7 +586,7 @@ public class GeminiService {
                     .query(originalQuery != null ? originalQuery : "")
                     .searchType(searchType != null ? searchType : "UNKNOWN")
                     .toolName(toolName != null ? toolName : "")
-                    .category(category != null ? category : "")
+                    .category(effectiveCategory != null ? effectiveCategory : "")
                     .minPrice(minPrice != null ? minPrice : 0.0)
                     .maxPrice(maxPrice != null ? maxPrice : 0.0)
                     .minRating(minRating != null ? minRating : 0.0)
@@ -582,7 +600,7 @@ public class GeminiService {
 
             eventProducer.publishAISearchEvent(event);
             log.info("Published AISearchEvent: query='{}', category='{}', minPrice={}, maxPrice={}",
-                    originalQuery, category, minPrice, maxPrice);
+                    originalQuery, effectiveCategory, minPrice, maxPrice);
 
         } catch (Exception e) {
             log.warn("Failed to publish AISearchEvent: {}", e.getMessage());
