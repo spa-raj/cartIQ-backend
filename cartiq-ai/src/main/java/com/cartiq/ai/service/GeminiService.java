@@ -559,7 +559,8 @@ public class GeminiService {
             long startTime) {
 
         try {
-            // Avro serializer requires non-null values - use defaults for optional fields
+            // Build AI search event with all fields populated
+            // Primitive types ensure non-null values for Avro schema
             AISearchEvent event = AISearchEvent.builder()
                     .eventId(UUID.randomUUID().toString())
                     .userId(userId != null ? userId : "anonymous")
@@ -580,7 +581,8 @@ public class GeminiService {
                     .build();
 
             eventProducer.publishAISearchEvent(event);
-            log.debug("Published AISearchEvent for query: {}", originalQuery);
+            log.info("Published AISearchEvent: query='{}', category='{}', minPrice={}, maxPrice={}",
+                    originalQuery, category, minPrice, maxPrice);
 
         } catch (Exception e) {
             log.warn("Failed to publish AISearchEvent: {}", e.getMessage());

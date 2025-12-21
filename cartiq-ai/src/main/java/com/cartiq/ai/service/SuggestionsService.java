@@ -291,10 +291,10 @@ public class SuggestionsService {
                     .limit(limit)
                     .toList();
 
-            // If no products in same category, try related categories (parent category)
-            if (filteredProducts.isEmpty() && !allProducts.isEmpty()) {
-                log.debug("No similar products in category '{}', using top vector matches", sourceCategory);
-                filteredProducts = allProducts.stream().limit(limit).toList();
+            // If no products in same category, return empty - don't show irrelevant products as "Similar to X"
+            if (filteredProducts.isEmpty()) {
+                log.debug("No similar products found in category '{}', returning empty (vector matches were in different categories)", sourceCategory);
+                return List.of();
             }
 
             // Context: the product name we're finding similar items for

@@ -150,6 +150,9 @@ public class KafkaEvents {
     /**
      * Event emitted when AI uses tools to search/filter products.
      * Captures user intent from natural language queries.
+     *
+     * IMPORTANT: All fields must be non-null for Avro serialization.
+     * Use primitive types where possible, or ensure defaults are set.
      */
     @Data
     @Builder
@@ -162,13 +165,13 @@ public class KafkaEvents {
         private String query;                   // Original user query
         private String searchType;              // TOOL_CALL, RAG, HYBRID
         private String toolName;                // searchProducts, getProductDetails, etc.
-        private String category;                // Category filter used (if any)
-        private Double minPrice;                // Price range filter (if any)
-        private Double maxPrice;
-        private Double minRating;               // Rating filter (if any)
-        private Integer resultsCount;           // Number of products returned
+        private String category;                // Category filter used (extracted from AI query)
+        private double minPrice;                // Price range filter (use primitive to ensure non-null)
+        private double maxPrice;
+        private double minRating;               // Rating filter
+        private int resultsCount;               // Number of products returned
         private List<String> returnedProductIds;
-        private Long processingTimeMs;
+        private long processingTimeMs;
         private String timestamp;               // ISO-8601 format
     }
 

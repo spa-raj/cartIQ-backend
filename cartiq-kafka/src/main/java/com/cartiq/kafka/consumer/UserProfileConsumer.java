@@ -281,40 +281,76 @@ public class UserProfileConsumer {
                 .build();
     }
 
+    /**
+     * Safely get a String field from GenericRecord.
+     * Returns null if field doesn't exist in schema.
+     */
     private String getStringField(GenericRecord record, String fieldName) {
-        Object value = record.get(fieldName);
-        return value != null ? value.toString() : null;
+        try {
+            Object value = record.get(fieldName);
+            return value != null ? value.toString() : null;
+        } catch (Exception e) {
+            // Field doesn't exist in schema - return default
+            return null;
+        }
     }
 
+    /**
+     * Safely get a Long field from GenericRecord.
+     * Returns 0L if field doesn't exist in schema.
+     */
     private Long getLongField(GenericRecord record, String fieldName) {
-        Object value = record.get(fieldName);
-        if (value == null) return 0L;
-        if (value instanceof Long) return (Long) value;
-        if (value instanceof Number) return ((Number) value).longValue();
-        return 0L;
+        try {
+            Object value = record.get(fieldName);
+            if (value == null) return 0L;
+            if (value instanceof Long) return (Long) value;
+            if (value instanceof Number) return ((Number) value).longValue();
+            return 0L;
+        } catch (Exception e) {
+            // Field doesn't exist in schema - return default
+            return 0L;
+        }
     }
 
+    /**
+     * Safely get a Double field from GenericRecord.
+     * Returns 0.0 if field doesn't exist in schema.
+     */
     private Double getDoubleField(GenericRecord record, String fieldName) {
-        Object value = record.get(fieldName);
-        if (value == null) return 0.0;
-        if (value instanceof Double) return (Double) value;
-        if (value instanceof Number) return ((Number) value).doubleValue();
-        return 0.0;
+        try {
+            Object value = record.get(fieldName);
+            if (value == null) return 0.0;
+            if (value instanceof Double) return (Double) value;
+            if (value instanceof Number) return ((Number) value).doubleValue();
+            return 0.0;
+        } catch (Exception e) {
+            // Field doesn't exist in schema - return default
+            return 0.0;
+        }
     }
 
+    /**
+     * Safely get a List<String> field from GenericRecord.
+     * Returns empty list if field doesn't exist in schema.
+     */
     @SuppressWarnings("unchecked")
     private List<String> getStringList(GenericRecord record, String fieldName) {
-        Object value = record.get(fieldName);
-        if (value == null) return List.of();
-        if (value instanceof List<?> list) {
-            List<String> result = new ArrayList<>();
-            for (Object item : list) {
-                if (item != null) {
-                    result.add(item.toString());
+        try {
+            Object value = record.get(fieldName);
+            if (value == null) return List.of();
+            if (value instanceof List<?> list) {
+                List<String> result = new ArrayList<>();
+                for (Object item : list) {
+                    if (item != null) {
+                        result.add(item.toString());
+                    }
                 }
+                return result;
             }
-            return result;
+            return List.of();
+        } catch (Exception e) {
+            // Field doesn't exist in schema - return default
+            return List.of();
         }
-        return List.of();
     }
 }
