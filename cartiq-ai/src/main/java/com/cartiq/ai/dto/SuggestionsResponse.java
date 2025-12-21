@@ -1,6 +1,5 @@
 package com.cartiq.ai.dto;
 
-import com.cartiq.product.dto.ProductDTO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,8 +17,8 @@ import java.util.Map;
 @AllArgsConstructor
 public class SuggestionsResponse {
 
-    /** List of suggested products */
-    private List<ProductDTO> products;
+    /** List of suggested products with recommendation context */
+    private List<SuggestedProduct> products;
 
     /** Total number of products returned */
     private int totalCount;
@@ -32,4 +31,7 @@ public class SuggestionsResponse {
 
     /** User ID (null for anonymous users) */
     private String userId;
+
+    /** Timestamp when user profile was last updated (null if not personalized) */
+    private String lastUpdated;
 }

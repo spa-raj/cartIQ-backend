@@ -1,5 +1,6 @@
 package com.cartiq.ai.service;
 
+import com.cartiq.ai.dto.SuggestedProduct;
 import com.cartiq.ai.dto.SuggestionsResponse;
 import com.cartiq.kafka.dto.UserProfile;
 import com.cartiq.product.dto.ProductDTO;
@@ -48,7 +49,7 @@ public class SuggestionsService {
 
         UserProfile profile = getUserProfile(userId);
 
-        List<ProductDTO> suggestions = new ArrayList<>();
+        List<SuggestedProduct> suggestions = new ArrayList<>();
         Map<String, String> strategyUsed = new LinkedHashMap<>();
 
         int remaining = limit;
@@ -56,7 +57,7 @@ public class SuggestionsService {
         // Strategy 1: AI Intent (strongest signal - 40% of results)
         if (profile != null && hasAIIntent(profile)) {
             int aiLimit = Math.min(remaining, (int) Math.ceil(limit * 0.4));
-            List<ProductDTO> aiProducts = getAIIntentProducts(profile, aiLimit);
+            List<SuggestedProduct> aiProducts = getAIIntentProducts(profile, aiLimit);
             suggestions.addAll(aiProducts);
             remaining -= aiProducts.size();
             strategyUsed.put("ai_intent", String.valueOf(aiProducts.size()));
@@ -66,7 +67,7 @@ public class SuggestionsService {
         // Strategy 2: Similar to recently viewed (30% of results)
         if (profile != null && hasRecentViews(profile) && remaining > 0) {
             int similarLimit = Math.min(remaining, (int) Math.ceil(limit * 0.3));
-            List<ProductDTO> similarProducts = getSimilarProducts(profile, similarLimit, suggestions);
+            List<SuggestedProduct> similarProducts = getSimilarProducts(profile, similarLimit, suggestions);
             suggestions.addAll(similarProducts);
             remaining -= similarProducts.size();
             strategyUsed.put("similar_products", String.valueOf(similarProducts.size()));
@@ -76,7 +77,7 @@ public class SuggestionsService {
         // Strategy 3: Category affinity (20% of results)
         if (profile != null && hasCategories(profile) && remaining > 0) {
             int categoryLimit = Math.min(remaining, (int) Math.ceil(limit * 0.2));
-            List<ProductDTO> categoryProducts = getCategoryProducts(profile, categoryLimit, suggestions);
+            List<SuggestedProduct> categoryProducts = getCategoryProducts(profile, categoryLimit, suggestions);
             suggestions.addAll(categoryProducts);
             remaining -= categoryProducts.size();
             strategyUsed.put("category_affinity", String.valueOf(categoryProducts.size()));
@@ -85,14 +86,14 @@ public class SuggestionsService {
 
         // Strategy 4: Cold start / Fill remaining (10% or all if no profile)
         if (remaining > 0) {
-            List<ProductDTO> trendingProducts = getTrendingProducts(remaining, suggestions);
+            List<SuggestedProduct> trendingProducts = getTrendingProducts(remaining, suggestions);
             suggestions.addAll(trendingProducts);
             strategyUsed.put("trending", String.valueOf(trendingProducts.size()));
             log.debug("Trending strategy returned {} products", trendingProducts.size());
         }
 
         // Final deduplication and limit
-        List<ProductDTO> finalSuggestions = deduplicateAndLimit(suggestions, limit);
+        List<SuggestedProduct> finalSuggestions = deduplicateAndLimit(suggestions, limit);
 
         log.info("Returning {} suggestions for userId={}, personalized={}, strategies={}",
                 finalSuggestions.size(), userId, profile != null, strategyUsed);
@@ -103,6 +104,9 @@ public class SuggestionsService {
                 .personalized(profile != null)
                 .strategies(strategyUsed)
                 .userId(userId)
+                .lastUpdated(profile != null && profile.getLastUpdated() != null
+                        ? profile.getLastUpdated().toString()
+                        : null)
                 .build();
     }
 
@@ -195,7 +199,7 @@ public class SuggestionsService {
      * Strategy 1: AI Intent Products
      * Uses explicit signals from AI chat (category, budget)
      */
-    private List<ProductDTO> getAIIntentProducts(UserProfile profile, int limit) {
+    private List<SuggestedProduct> getAIIntentProducts(UserProfile profile, int limit) {
         try {
             List<String> categories = profile.getAiSearchCategories();
             Double maxBudget = profile.getAiMaxBudget();
@@ -222,7 +226,16 @@ public class SuggestionsService {
                     .map(r -> UUID.fromString(r.getProductId()))
                     .toList();
 
-            return productService.getProductsByIds(productIds);
+            List<ProductDTO> products = productService.getProductsByIds(productIds);
+
+            // Context for reason: first category or query
+            String context = categories != null && !categories.isEmpty()
+                    ? categories.stream().filter(c -> c != null && !c.isBlank()).findFirst().orElse(query)
+                    : query;
+
+            return products.stream()
+                    .map(p -> SuggestedProduct.fromStrategy(p, "ai_intent", context))
+                    .toList();
 
         } catch (Exception e) {
             log.warn("AI intent strategy failed: {}", e.getMessage());
@@ -234,7 +247,7 @@ public class SuggestionsService {
      * Strategy 2: Similar Products
      * Vector search based on recently viewed product embeddings
      */
-    private List<ProductDTO> getSimilarProducts(UserProfile profile, int limit, List<ProductDTO> existing) {
+    private List<SuggestedProduct> getSimilarProducts(UserProfile profile, int limit, List<SuggestedProduct> existing) {
         try {
             // Get most recently viewed product
             String recentProductId = profile.getRecentProductIds().get(0);
@@ -252,7 +265,7 @@ public class SuggestionsService {
 
             // Get existing product IDs to exclude
             Set<UUID> existingIds = existing.stream()
-                    .map(ProductDTO::getId)
+                    .map(sp -> sp.getProduct().getId())
                     .collect(Collectors.toSet());
             existingIds.add(UUID.fromString(recentProductId)); // Also exclude the source product
 
@@ -263,7 +276,17 @@ public class SuggestionsService {
                     .limit(limit)
                     .toList();
 
-            return productService.getProductsByIds(productIds);
+            List<ProductDTO> products = productService.getProductsByIds(productIds);
+
+            // Context: the product name we're finding similar items for
+            String productName = recentProduct.getName();
+            final String context = (productName != null && productName.length() > 30)
+                    ? productName.substring(0, 30) + "..."
+                    : productName;
+
+            return products.stream()
+                    .map(p -> SuggestedProduct.fromStrategy(p, "similar_products", context))
+                    .toList();
 
         } catch (Exception e) {
             log.warn("Similar products strategy failed: {}", e.getMessage());
@@ -275,7 +298,7 @@ public class SuggestionsService {
      * Strategy 3: Category Products
      * Top-rated products in user's browsed categories, filtered by price preference
      */
-    private List<ProductDTO> getCategoryProducts(UserProfile profile, int limit, List<ProductDTO> existing) {
+    private List<SuggestedProduct> getCategoryProducts(UserProfile profile, int limit, List<SuggestedProduct> existing) {
         try {
             List<String> categories = profile.getRecentCategories().stream()
                     .filter(c -> c != null && !c.isBlank())
@@ -296,12 +319,17 @@ public class SuggestionsService {
 
             // Filter out already included products
             Set<UUID> existingIds = existing.stream()
-                    .map(ProductDTO::getId)
+                    .map(sp -> sp.getProduct().getId())
                     .collect(Collectors.toSet());
+
+            // Context: primary category
+            String primaryCategory = categories.get(0);
 
             return categoryProducts.stream()
                     .filter(p -> !existingIds.contains(p.getId()))
                     .limit(limit)
+                    .map(p -> SuggestedProduct.fromStrategy(p, "category_affinity",
+                            p.getCategoryName() != null ? p.getCategoryName() : primaryCategory))
                     .toList();
 
         } catch (Exception e) {
@@ -313,18 +341,19 @@ public class SuggestionsService {
     /**
      * Strategy 4: Trending/Featured Products (Cold Start)
      */
-    private List<ProductDTO> getTrendingProducts(int limit, List<ProductDTO> existing) {
+    private List<SuggestedProduct> getTrendingProducts(int limit, List<SuggestedProduct> existing) {
         try {
             List<ProductDTO> trendingProducts = productService.getTopFeaturedProducts(limit + existing.size());
 
             // Filter out already included products
             Set<UUID> existingIds = existing.stream()
-                    .map(ProductDTO::getId)
+                    .map(sp -> sp.getProduct().getId())
                     .collect(Collectors.toSet());
 
             return trendingProducts.stream()
                     .filter(p -> !existingIds.contains(p.getId()))
                     .limit(limit)
+                    .map(p -> SuggestedProduct.fromStrategy(p, "trending", null))
                     .toList();
 
         } catch (Exception e) {
@@ -362,12 +391,13 @@ public class SuggestionsService {
         };
     }
 
-    private List<ProductDTO> deduplicateAndLimit(List<ProductDTO> products, int limit) {
-        Map<UUID, ProductDTO> uniqueProducts = new LinkedHashMap<>();
+    private List<SuggestedProduct> deduplicateAndLimit(List<SuggestedProduct> products, int limit) {
+        Map<UUID, SuggestedProduct> uniqueProducts = new LinkedHashMap<>();
 
-        for (ProductDTO product : products) {
-            if (product != null && product.getId() != null && !uniqueProducts.containsKey(product.getId())) {
-                uniqueProducts.put(product.getId(), product);
+        for (SuggestedProduct sp : products) {
+            if (sp != null && sp.getProduct() != null && sp.getProduct().getId() != null
+                    && !uniqueProducts.containsKey(sp.getProduct().getId())) {
+                uniqueProducts.put(sp.getProduct().getId(), sp);
             }
             if (uniqueProducts.size() >= limit) {
                 break;
