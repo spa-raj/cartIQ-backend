@@ -19,6 +19,7 @@ public class CartItemDTO {
     private UUID id;
     private UUID productId;
     private String productName;
+    private String categoryName;
     private BigDecimal unitPrice;
     private Integer quantity;
     private BigDecimal subtotal;
@@ -31,6 +32,7 @@ public class CartItemDTO {
                 .id(item.getId())
                 .productId(item.getProductId())
                 .productName(item.getProductName())
+                .categoryName(item.getCategoryName())
                 .unitPrice(item.getUnitPrice())
                 .quantity(item.getQuantity())
                 .subtotal(item.getSubtotal())

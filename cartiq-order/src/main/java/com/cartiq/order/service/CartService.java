@@ -74,6 +74,7 @@ public class CartService {
             CartItem newItem = CartItem.builder()
                     .productId(product.getId())
                     .productName(product.getName())
+                    .categoryName(product.getCategoryName())
                     .unitPrice(product.getPrice())
                     .quantity(request.getQuantity())
                     .thumbnailUrl(product.getThumbnailUrl())

@@ -41,6 +41,9 @@ public class CartItem {
     @Column(nullable = false)
     private String productName;
 
+    @Column(nullable = false)
+    private String categoryName;
+
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal unitPrice;
 
