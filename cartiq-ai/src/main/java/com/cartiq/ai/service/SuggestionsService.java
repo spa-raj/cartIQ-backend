@@ -84,12 +84,16 @@ public class SuggestionsService {
             log.debug("Category affinity strategy returned {} products", categoryProducts.size());
         }
 
-        // Strategy 4: Cold start / Fill remaining (10% or all if no profile)
+        // Strategy 4: Cold start / Fill remaining
+        // Cap trending to 50% max when user has profile (ensures personalized content priority)
         if (remaining > 0) {
-            List<SuggestedProduct> trendingProducts = getTrendingProducts(remaining, suggestions);
+            int maxTrending = profile != null
+                    ? Math.min(remaining, (int) Math.ceil(limit * 0.5))
+                    : remaining; // No cap for anonymous users (cold start)
+            List<SuggestedProduct> trendingProducts = getTrendingProducts(maxTrending, suggestions);
             suggestions.addAll(trendingProducts);
             strategyUsed.put("trending", String.valueOf(trendingProducts.size()));
-            log.debug("Trending strategy returned {} products", trendingProducts.size());
+            log.debug("Trending strategy returned {} products (capped to {})", trendingProducts.size(), maxTrending);
         }
 
         // Final deduplication and limit
@@ -245,7 +249,8 @@ public class SuggestionsService {
 
     /**
      * Strategy 2: Similar Products
-     * Vector search based on recently viewed product embeddings
+     * Vector search based on recently viewed product embeddings.
+     * IMPORTANT: Filters results to same category to ensure relevance.
      */
     private List<SuggestedProduct> getSimilarProducts(UserProfile profile, int limit, List<SuggestedProduct> existing) {
         try {
@@ -257,11 +262,14 @@ public class SuggestionsService {
                 return List.of();
             }
 
+            // Get the category of the viewed product for filtering
+            String sourceCategory = recentProduct.getCategoryName();
+
             // Build query from product attributes
             String query = buildProductQuery(recentProduct);
 
-            // Search for similar products
-            List<SearchResult> results = vectorSearchService.search(query, limit + 5, Map.of());
+            // Search for more products to filter by category
+            List<SearchResult> results = vectorSearchService.search(query, limit * 3, Map.of());
 
             // Get existing product IDs to exclude
             Set<UUID> existingIds = existing.stream()
@@ -269,14 +277,25 @@ public class SuggestionsService {
                     .collect(Collectors.toSet());
             existingIds.add(UUID.fromString(recentProductId)); // Also exclude the source product
 
-            // Convert and filter
-            List<UUID> productIds = results.stream()
+            // Convert to UUIDs
+            List<UUID> candidateIds = results.stream()
                     .map(r -> UUID.fromString(r.getProductId()))
                     .filter(id -> !existingIds.contains(id))
+                    .toList();
+
+            // Fetch products and filter by same category
+            List<ProductDTO> allProducts = productService.getProductsByIds(candidateIds);
+
+            List<ProductDTO> filteredProducts = allProducts.stream()
+                    .filter(p -> sourceCategory != null && sourceCategory.equalsIgnoreCase(p.getCategoryName()))
                     .limit(limit)
                     .toList();
 
-            List<ProductDTO> products = productService.getProductsByIds(productIds);
+            // If no products in same category, try related categories (parent category)
+            if (filteredProducts.isEmpty() && !allProducts.isEmpty()) {
+                log.debug("No similar products in category '{}', using top vector matches", sourceCategory);
+                filteredProducts = allProducts.stream().limit(limit).toList();
+            }
 
             // Context: the product name we're finding similar items for
             String productName = recentProduct.getName();
@@ -284,7 +303,7 @@ public class SuggestionsService {
                     ? productName.substring(0, 30) + "..."
                     : productName;
 
-            return products.stream()
+            return filteredProducts.stream()
                     .map(p -> SuggestedProduct.fromStrategy(p, "similar_products", context))
                     .toList();
 

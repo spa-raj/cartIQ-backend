@@ -140,12 +140,13 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     /**
      * Find top-rated products by category names with optional price filters.
      * Used for suggestions based on category affinity.
+     * Note: p.id added for deterministic ordering when rating/reviewCount are equal.
      */
     @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
            "AND p.category.name IN :categoryNames " +
            "AND (:minPrice IS NULL OR p.price >= :minPrice) " +
            "AND (:maxPrice IS NULL OR p.price <= :maxPrice) " +
-           "ORDER BY p.rating DESC NULLS LAST, p.reviewCount DESC NULLS LAST")
+           "ORDER BY p.rating DESC NULLS LAST, p.reviewCount DESC NULLS LAST, p.id ASC")
     List<Product> findTopRatedByCategoryNames(@Param("categoryNames") List<String> categoryNames,
                                                @Param("minPrice") BigDecimal minPrice,
                                                @Param("maxPrice") BigDecimal maxPrice,
@@ -154,8 +155,9 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
     /**
      * Find top featured/trending products for cold start recommendations.
      * Orders by featured flag, then rating, then review count.
+     * Note: p.id added for deterministic ordering when other fields are equal.
      */
     @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
-           "ORDER BY p.featured DESC NULLS LAST, p.rating DESC NULLS LAST, p.reviewCount DESC NULLS LAST")
+           "ORDER BY p.featured DESC NULLS LAST, p.rating DESC NULLS LAST, p.reviewCount DESC NULLS LAST, p.id ASC")
     List<Product> findTopFeaturedProducts(Pageable pageable);
 }
