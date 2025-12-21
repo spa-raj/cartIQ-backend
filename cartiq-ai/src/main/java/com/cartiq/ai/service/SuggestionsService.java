@@ -230,10 +230,12 @@ public class SuggestionsService {
                 return List.of();
             }
 
-            // Filter valid categories
+            // Filter valid categories - limit to top 3 to avoid API quota issues
+            // Most recent categories (first in list) have highest intent signal
             List<String> validCategories = categories.stream()
                     .filter(c -> c != null && !c.isBlank())
                     .distinct()
+                    .limit(3)  // Top 3 categories only to manage API quota
                     .toList();
 
             if (validCategories.isEmpty()) {
@@ -250,19 +252,26 @@ public class SuggestionsService {
             List<SuggestedProduct> allResults = new ArrayList<>();
             Set<UUID> seenProductIds = new HashSet<>();
 
-            // Distribute limit across categories (at least 2 per category, more for fewer categories)
-            int perCategoryLimit = Math.max(2, (int) Math.ceil((double) limit / validCategories.size()));
+            // Distribute limit across categories
+            int perCategoryLimit = Math.max(3, (int) Math.ceil((double) limit / validCategories.size()));
 
-            for (String category : validCategories) {
+            for (int i = 0; i < validCategories.size(); i++) {
+                String category = validCategories.get(i);
                 if (allResults.size() >= limit) {
                     break;
                 }
 
-                log.debug("AI intent: searching for category '{}' with limit {} (with query expansion)", category, perCategoryLimit);
+                List<SearchResult> results;
 
-                // Use expanded search for better recall - generates variations like:
-                // "Headphones" -> ["Headphones", "wireless earbuds", "audio headset", "earphones"]
-                List<SearchResult> results = vectorSearchService.searchWithExpansion(category, perCategoryLimit, filters, 3);
+                // Use query expansion only for first category (highest intent) to manage quota
+                // Other categories use regular search
+                if (i == 0) {
+                    log.debug("AI intent: searching for category '{}' with limit {} (with query expansion)", category, perCategoryLimit);
+                    results = vectorSearchService.searchWithExpansion(category, perCategoryLimit, filters, 2);
+                } else {
+                    log.debug("AI intent: searching for category '{}' with limit {}", category, perCategoryLimit);
+                    results = vectorSearchService.search(category, perCategoryLimit, filters);
+                }
 
                 // Convert to ProductDTOs and filter duplicates
                 List<UUID> productIds = results.stream()

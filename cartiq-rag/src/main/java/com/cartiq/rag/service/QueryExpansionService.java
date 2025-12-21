@@ -8,11 +8,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.*;
 
 /**
  * Service for expanding search queries using Gemini.
  * Generates semantically similar query variations to improve vector search recall.
+ * Includes in-memory caching to reduce API calls and avoid quota issues.
  */
 @Slf4j
 @Service
@@ -22,7 +24,12 @@ public class QueryExpansionService {
     private final String modelName;
     private final RagConfig ragConfig;
 
-    private static final int DEFAULT_VARIATIONS = 3;
+    // In-memory cache for query expansions (query -> variations)
+    // Simple cache since expansions are deterministic and don't change often
+    private final Map<String, List<String>> expansionCache = new ConcurrentHashMap<>();
+    private static final int MAX_CACHE_SIZE = 500;
+
+    private static final int DEFAULT_VARIATIONS = 2;  // Reduced from 3 to manage quota
     private static final Pattern QUERY_PATTERN = Pattern.compile("\\d+\\.\\s*[\"']?([^\"'\\n]+)[\"']?");
 
     public QueryExpansionService(
@@ -53,19 +60,29 @@ public class QueryExpansionService {
 
     /**
      * Expand a search query into multiple semantically similar variations.
+     * Uses in-memory caching to reduce API calls.
      *
      * @param originalQuery The original search query
      * @param numVariations Number of variations to generate (2-4 recommended)
      * @return List of query variations including the original
      */
     public List<String> expandQuery(String originalQuery, int numVariations) {
+        if (originalQuery == null || originalQuery.isBlank()) {
+            return List.of();
+        }
+
+        String normalizedQuery = originalQuery.trim().toLowerCase();
+
+        // Check cache first
+        List<String> cached = expansionCache.get(normalizedQuery);
+        if (cached != null) {
+            log.debug("Query expansion cache hit for '{}'", originalQuery);
+            return cached;
+        }
+
         if (!isAvailable()) {
             log.debug("Query expansion not available, returning original query");
             return List.of(originalQuery);
-        }
-
-        if (originalQuery == null || originalQuery.isBlank()) {
-            return List.of();
         }
 
         // Cap variations to reasonable range
@@ -82,8 +99,8 @@ public class QueryExpansionService {
             );
 
             GenerateContentConfig config = GenerateContentConfig.builder()
-                    .temperature(0.7f)  // Some creativity for variations
-                    .maxOutputTokens(200)
+                    .temperature(0.3f)  // Lower temperature for more consistent expansions (better caching)
+                    .maxOutputTokens(150)
                     .build();
 
             long startTime = System.currentTimeMillis();
@@ -95,6 +112,11 @@ public class QueryExpansionService {
 
             List<String> variations = parseVariations(response, originalQuery);
             long elapsed = System.currentTimeMillis() - startTime;
+
+            // Cache the result
+            if (!variations.isEmpty()) {
+                cacheExpansion(normalizedQuery, variations);
+            }
 
             log.debug("Query expansion: '{}' -> {} variations in {}ms: {}",
                     originalQuery, variations.size(), elapsed, variations);
@@ -196,6 +218,25 @@ public class QueryExpansionService {
         }
 
         return new ArrayList<>(variations);
+    }
+
+    /**
+     * Cache an expansion result with size limit management.
+     */
+    private void cacheExpansion(String query, List<String> variations) {
+        // Simple size management - clear oldest entries if at limit
+        if (expansionCache.size() >= MAX_CACHE_SIZE) {
+            // Remove ~10% of entries to avoid frequent clearing
+            int toRemove = MAX_CACHE_SIZE / 10;
+            Iterator<String> it = expansionCache.keySet().iterator();
+            while (it.hasNext() && toRemove > 0) {
+                it.next();
+                it.remove();
+                toRemove--;
+            }
+            log.debug("Cleared {} entries from query expansion cache", MAX_CACHE_SIZE / 10);
+        }
+        expansionCache.put(query, List.copyOf(variations));
     }
 
     /**
