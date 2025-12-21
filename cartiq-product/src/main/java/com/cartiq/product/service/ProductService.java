@@ -19,8 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -311,16 +311,52 @@ public class ProductService {
 
     /**
      * Get featured/trending products for cold start recommendations.
-     * Orders by featured flag, rating, and review count.
+     * Ensures CATEGORY DIVERSITY - products from different categories.
+     * Orders by featured flag, rating, and review count within each category.
      *
      * @param limit Maximum number of products to return
-     * @return List of featured/trending products
+     * @return List of featured/trending products with category diversity
      */
     @Transactional(readOnly = true)
     public List<ProductDTO> getTopFeaturedProducts(int limit) {
-        return productRepository.findTopFeaturedProducts(PageRequest.of(0, limit))
-                .stream()
-                .map(ProductDTO::fromEntity)
-                .toList();
+        // Fetch more products than needed to ensure diversity
+        int fetchLimit = Math.min(limit * 5, 100);
+        List<Product> allProducts = productRepository.findTopFeaturedProducts(PageRequest.of(0, fetchLimit));
+
+        if (allProducts.isEmpty()) {
+            return List.of();
+        }
+
+        // Group products by category
+        Map<String, List<Product>> productsByCategory = allProducts.stream()
+                .collect(Collectors.groupingBy(
+                        p -> p.getCategory() != null ? p.getCategory().getName() : "Uncategorized",
+                        LinkedHashMap::new,  // Preserve insertion order (by rating)
+                        Collectors.toList()
+                ));
+
+        // Round-robin select from each category to ensure diversity
+        List<ProductDTO> diverseProducts = new ArrayList<>();
+        Set<UUID> addedProductIds = new HashSet<>();
+        int maxIterations = limit; // Prevent infinite loops
+
+        for (int i = 0; i < maxIterations && diverseProducts.size() < limit; i++) {
+            for (List<Product> categoryProducts : productsByCategory.values()) {
+                if (diverseProducts.size() >= limit) {
+                    break;
+                }
+                if (i < categoryProducts.size()) {
+                    Product product = categoryProducts.get(i);
+                    if (addedProductIds.add(product.getId())) {
+                        diverseProducts.add(ProductDTO.fromEntity(product));
+                    }
+                }
+            }
+        }
+
+        log.debug("Trending products: {} categories, {} products returned",
+                productsByCategory.size(), diverseProducts.size());
+
+        return diverseProducts;
     }
 }
