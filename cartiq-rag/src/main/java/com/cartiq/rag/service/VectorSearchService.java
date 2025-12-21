@@ -26,6 +26,7 @@ public class VectorSearchService {
 
     private final RagConfig ragConfig;
     private final EmbeddingService embeddingService;
+    private final QueryExpansionService queryExpansionService;
     private final String projectId;
     private final String location;
     private final ObjectMapper objectMapper;
@@ -37,10 +38,12 @@ public class VectorSearchService {
     public VectorSearchService(
             RagConfig ragConfig,
             EmbeddingService embeddingService,
+            QueryExpansionService queryExpansionService,
             @Value("${vertex.ai.project-id:}") String projectId,
             @Value("${vertex.ai.location:us-central1}") String location) {
         this.ragConfig = ragConfig;
         this.embeddingService = embeddingService;
+        this.queryExpansionService = queryExpansionService;
         this.projectId = projectId;
         this.location = location;
         this.objectMapper = new ObjectMapper();
@@ -112,6 +115,82 @@ public class VectorSearchService {
             log.error("Error during vector search: {}", e.getMessage(), e);
             return List.of();
         }
+    }
+
+    /**
+     * Search with query expansion for improved recall.
+     * Generates multiple semantically similar queries using Gemini and merges results.
+     *
+     * @param query Original search query
+     * @param topK Number of results to return
+     * @param filters Optional filters (maxPrice, minPrice, minRating)
+     * @param numVariations Number of query variations to generate (2-4)
+     * @return Merged and deduplicated search results
+     */
+    public List<SearchResult> searchWithExpansion(String query, int topK, Map<String, Object> filters, int numVariations) {
+        if (!isAvailable()) {
+            log.warn("Vector Search not available");
+            return List.of();
+        }
+
+        try {
+            // Generate query variations
+            List<String> queryVariations = queryExpansionService.expandQuery(query, numVariations);
+
+            if (queryVariations.isEmpty()) {
+                return List.of();
+            }
+
+            // If only original query (expansion failed/disabled), fall back to regular search
+            if (queryVariations.size() == 1) {
+                return search(query, topK, filters);
+            }
+
+            long startTime = System.currentTimeMillis();
+
+            // Search with each variation and collect results
+            Map<String, SearchResult> resultMap = new LinkedHashMap<>(); // Preserve order, dedupe by productId
+            int perQueryLimit = Math.max(3, (int) Math.ceil((double) topK / queryVariations.size()) + 1);
+
+            for (String variation : queryVariations) {
+                List<SearchResult> variationResults = search(variation, perQueryLimit, filters);
+
+                for (SearchResult result : variationResults) {
+                    // Keep highest similarity score if duplicate
+                    resultMap.merge(result.getProductId(), result, (existing, newer) ->
+                            existing.getSimilarityScore() >= newer.getSimilarityScore() ? existing : newer);
+                }
+
+                // Stop early if we have enough results
+                if (resultMap.size() >= topK * 2) {
+                    break;
+                }
+            }
+
+            // Sort by similarity score and limit
+            List<SearchResult> mergedResults = resultMap.values().stream()
+                    .sorted((a, b) -> Double.compare(b.getSimilarityScore(), a.getSimilarityScore()))
+                    .limit(topK)
+                    .toList();
+
+            long elapsed = System.currentTimeMillis() - startTime;
+            log.info("Expanded search: query='{}', variations={}, total_candidates={}, returned={}, time={}ms",
+                    query, queryVariations.size(), resultMap.size(), mergedResults.size(), elapsed);
+
+            return mergedResults;
+
+        } catch (Exception e) {
+            log.error("Error during expanded search: {}", e.getMessage(), e);
+            // Fall back to regular search
+            return search(query, topK, filters);
+        }
+    }
+
+    /**
+     * Search with query expansion using default 3 variations.
+     */
+    public List<SearchResult> searchWithExpansion(String query, int topK, Map<String, Object> filters) {
+        return searchWithExpansion(query, topK, filters, 3);
     }
 
     /**

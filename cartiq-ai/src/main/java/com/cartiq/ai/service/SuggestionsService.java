@@ -258,9 +258,11 @@ public class SuggestionsService {
                     break;
                 }
 
-                log.debug("AI intent: searching for category '{}' with limit {}", category, perCategoryLimit);
+                log.debug("AI intent: searching for category '{}' with limit {} (with query expansion)", category, perCategoryLimit);
 
-                List<SearchResult> results = vectorSearchService.search(category, perCategoryLimit, filters);
+                // Use expanded search for better recall - generates variations like:
+                // "Headphones" -> ["Headphones", "wireless earbuds", "audio headset", "earphones"]
+                List<SearchResult> results = vectorSearchService.searchWithExpansion(category, perCategoryLimit, filters, 3);
 
                 // Convert to ProductDTOs and filter duplicates
                 List<UUID> productIds = results.stream()
