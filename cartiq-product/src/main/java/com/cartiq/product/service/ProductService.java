@@ -158,10 +158,57 @@ public class ProductService {
         ).map(ProductDTO::fromEntity);
     }
 
+    /**
+     * Get featured products with category diversity and randomization.
+     * Ensures products from different categories are shown, not just one category.
+     */
     @Transactional(readOnly = true)
     public Page<ProductDTO> getFeaturedProducts(Pageable pageable) {
-        return productRepository.findFeaturedProducts(pageable)
-                .map(ProductDTO::fromEntity);
+        int requestedSize = pageable.getPageSize();
+        int fetchSize = Math.min(requestedSize * 5, 100);
+
+        // Fetch more products than needed for diversity
+        List<Product> allProducts = productRepository.findFeaturedProducts(
+                PageRequest.of(0, fetchSize)).getContent();
+
+        if (allProducts.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
+        // Group by category
+        Map<String, List<Product>> productsByCategory = allProducts.stream()
+                .collect(Collectors.groupingBy(
+                        p -> p.getCategory() != null ? p.getCategory().getName() : "Uncategorized",
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+
+        // Shuffle products within each category for randomization
+        Random random = new Random();
+        productsByCategory.values().forEach(list -> Collections.shuffle(list, random));
+
+        // Round-robin select from each category
+        List<ProductDTO> diverseProducts = new ArrayList<>();
+        Set<UUID> addedIds = new HashSet<>();
+        int maxIterations = requestedSize;
+
+        for (int i = 0; i < maxIterations && diverseProducts.size() < requestedSize; i++) {
+            for (List<Product> categoryProducts : productsByCategory.values()) {
+                if (diverseProducts.size() >= requestedSize) break;
+                if (i < categoryProducts.size()) {
+                    Product product = categoryProducts.get(i);
+                    if (addedIds.add(product.getId())) {
+                        diverseProducts.add(ProductDTO.fromEntity(product));
+                    }
+                }
+            }
+        }
+
+        log.debug("Featured products: {} categories, {} products (randomized)",
+                productsByCategory.size(), diverseProducts.size());
+
+        return new org.springframework.data.domain.PageImpl<>(
+                diverseProducts, pageable, allProducts.size());
     }
 
     @Transactional(readOnly = true)
