@@ -226,40 +226,40 @@ public class SuggestionsService {
 
     /**
      * Strategy 1: AI Intent Products
-     * Uses explicit signals from AI chat (category, budget).
+     * Uses category signals and budget to find relevant products.
      * Searches each category separately for better semantic matching.
      *
-     * Category priority:
-     * 1. AI search categories (strongest - explicit queries)
-     * 2. Cart categories (strong - items user is considering)
-     * 3. Recent categories (moderate - items user browsed)
+     * Category priority (based on reliability):
+     * 1. Cart categories (most reliable - from actual products user wants to buy)
+     * 2. Recent categories (reliable - from products user viewed)
+     * 3. AI search categories (less reliable - may have incorrect category inference)
      */
     private List<SuggestedProduct> getAIIntentProducts(UserProfile profile, int limit) {
         try {
             Double maxBudget = profile.getAiMaxBudget();
 
             // Combine categories from all sources with priority ordering
-            // AI search categories first (strongest signal), then cart, then recent
+            // Cart & Recent first (reliable from actual product views), AI last (may have wrong categories)
             List<String> combinedCategories = new ArrayList<>();
 
-            // Priority 1: AI search categories (explicit queries)
-            if (profile.getAiSearchCategories() != null) {
-                profile.getAiSearchCategories().stream()
+            // Priority 1: Cart categories (strongest - user is ready to buy these)
+            if (profile.getCartCategories() != null) {
+                profile.getCartCategories().stream()
                         .filter(c -> c != null && !c.isBlank())
                         .forEach(combinedCategories::add);
             }
 
-            // Priority 2: Cart categories (items being considered)
-            if (profile.getCartCategories() != null) {
-                profile.getCartCategories().stream()
+            // Priority 2: Recent categories (strong - user actively browsed these)
+            if (profile.getRecentCategories() != null) {
+                profile.getRecentCategories().stream()
                         .filter(c -> c != null && !c.isBlank())
                         .filter(c -> !combinedCategories.contains(c)) // Avoid duplicates
                         .forEach(combinedCategories::add);
             }
 
-            // Priority 3: Recent categories (browsed items)
-            if (profile.getRecentCategories() != null) {
-                profile.getRecentCategories().stream()
+            // Priority 3: AI search categories (may be inaccurate due to search issues)
+            if (profile.getAiSearchCategories() != null) {
+                profile.getAiSearchCategories().stream()
                         .filter(c -> c != null && !c.isBlank())
                         .filter(c -> !combinedCategories.contains(c)) // Avoid duplicates
                         .forEach(combinedCategories::add);
