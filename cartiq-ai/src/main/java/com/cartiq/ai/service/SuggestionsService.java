@@ -145,24 +145,41 @@ public class SuggestionsService {
             return UserProfile.builder()
                     .userId((String) map.get("userId"))
                     .sessionId((String) map.get("sessionId"))
+                    // Product activity
                     .recentProductIds((List<String>) map.get("recentProductIds"))
                     .recentCategories((List<String>) map.get("recentCategories"))
                     .recentSearchQueries((List<String>) map.get("recentSearchQueries"))
                     .totalProductViews(toLong(map.get("totalProductViews")))
                     .avgViewDurationMs(toLong(map.get("avgViewDurationMs")))
                     .avgProductPrice(toDouble(map.get("avgProductPrice")))
-                    .totalCartAdds(toLong(map.get("totalCartAdds")))
+                    // Preferences
+                    .pricePreference((String) map.get("pricePreference"))
+                    // Cart state
                     .currentCartTotal(toDouble(map.get("currentCartTotal")))
                     .currentCartItems(toLong(map.get("currentCartItems")))
+                    .cartAdds(toLong(map.get("cartAdds")))
+                    .cartProductIds((List<String>) map.get("cartProductIds"))
+                    .cartCategories((List<String>) map.get("cartCategories"))
+                    // Session info
                     .deviceType((String) map.get("deviceType"))
                     .sessionDurationMs(toLong(map.get("sessionDurationMs")))
-                    .pricePreference((String) map.get("pricePreference"))
+                    .totalPageViews(toLong(map.get("totalPageViews")))
+                    .productPageViews(toLong(map.get("productPageViews")))
+                    .cartPageViews(toLong(map.get("cartPageViews")))
+                    .checkoutPageViews(toLong(map.get("checkoutPageViews")))
+                    // AI intent signals
                     .aiSearchCount(toLong(map.get("aiSearchCount")))
                     .aiSearchQueries((List<String>) map.get("aiSearchQueries"))
                     .aiSearchCategories((List<String>) map.get("aiSearchCategories"))
                     .aiMaxBudget(toDouble(map.get("aiMaxBudget")))
                     .aiProductSearches(toLong(map.get("aiProductSearches")))
                     .aiProductComparisons(toLong(map.get("aiProductComparisons")))
+                    // Order history
+                    .totalOrders(toLong(map.get("totalOrders")))
+                    .totalSpent(toDouble(map.get("totalSpent")))
+                    .avgOrderValue(toDouble(map.get("avgOrderValue")))
+                    .lastOrderTotal(toDouble(map.get("lastOrderTotal")))
+                    .preferredPaymentMethod((String) map.get("preferredPaymentMethod"))
                     .build();
         } catch (Exception e) {
             log.warn("Failed to convert LinkedHashMap to UserProfile: {}", e.getMessage());

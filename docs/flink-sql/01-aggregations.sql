@@ -1,16 +1,16 @@
 -- ============================================================================
--- CartIQ Flink SQL: Intermediate Aggregations for Confluent Cloud
--- Run this before 02-user-profiles.sql
--- Uses timestamp-based bucketing (since auto-generated tables have STRING timestamps)
+-- CartIQ Flink SQL: Intermediate Materialized Tables
+-- Run this FIRST - creates materialized state tables for each event type
+-- These tables enable complex JOINs without retraction issues
 -- Format: avro-registry (default for Confluent Cloud Flink)
 -- ============================================================================
 
 -- ============================================================================
--- HELPER VIEWS: Parse STRING timestamps to TIMESTAMP
+-- STEP 1: HELPER VIEWS - Parse STRING timestamps to TIMESTAMP
 -- Auto-generated tables from Kafka topics have `timestamp` as STRING
 -- ============================================================================
 
-CREATE VIEW `product_views_timed` AS
+CREATE VIEW IF NOT EXISTS `product_views_timed` AS
 SELECT
     eventId, userId, sessionId, productId, productName,
     category, price, source, searchQuery, viewDurationMs,
@@ -18,7 +18,7 @@ SELECT
 FROM `product-views`
 WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
 
-CREATE VIEW `cart_events_timed` AS
+CREATE VIEW IF NOT EXISTS `cart_events_timed` AS
 SELECT
     eventId, userId, sessionId, action, productId, productName,
     category, quantity, price, cartTotal, cartItemCount,
@@ -26,7 +26,7 @@ SELECT
 FROM `cart-events`
 WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
 
-CREATE VIEW `user_events_timed` AS
+CREATE VIEW IF NOT EXISTS `user_events_timed` AS
 SELECT
     eventId, userId, sessionId, eventType, pageType,
     pageUrl, deviceType, referrer,
@@ -34,187 +34,142 @@ SELECT
 FROM `user-events`
 WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
 
--- ============================================================================
--- 1. RECENT PRODUCT VIEWS (5-minute buckets)
--- Aggregates recently viewed products per user session
--- Source: product-views topic (Avro schema)
--- ============================================================================
-CREATE VIEW recent_product_activity AS
-SELECT
-    userId,
-    sessionId,
-    -- Time bucket for JOIN key
-    DATE_FORMAT(event_time, 'yyyy-MM-dd HH:mm') AS timeBucket,
-    -- Collect recent product IDs (last 10)
-    COALESCE(
-        ARRAY_SLICE(ARRAY_AGG(productId), 1, 10),
-        ARRAY['']
-    ) AS recentProductIds,
-    -- Collect recent categories (deduplicated, last 5)
-    COALESCE(
-        ARRAY_SLICE(ARRAY_DISTINCT(ARRAY_AGG(category)), 1, 5),
-        ARRAY['']
-    ) AS recentCategories,
-    -- Collect search queries that led to views
-    COALESCE(
-        ARRAY_DISTINCT(ARRAY_AGG(searchQuery)),
-        ARRAY['']
-    ) AS recentSearchQueries,
-    -- Metrics
-    COUNT(*) AS totalProductViews,
-    CAST(COALESCE(AVG(viewDurationMs), 0) AS BIGINT) AS avgViewDurationMs,
-    COALESCE(AVG(price), 0.0) AS avgProductPrice,
-    COALESCE(MAX(price), 0.0) AS maxViewedPrice,
-    COALESCE(MIN(price), 0.0) AS minViewedPrice,
-    -- Window bounds
-    CAST(DATE_FORMAT(MIN(event_time), 'yyyy-MM-dd HH:mm:00') AS STRING) AS windowStart,
-    CAST(DATE_FORMAT(MIN(event_time) + INTERVAL '5' MINUTE, 'yyyy-MM-dd HH:mm:00') AS STRING) AS windowEnd,
-    -- Latest event time for lastUpdated
-    MAX(event_time) AS lastEventTime
-FROM `product_views_timed`
-WHERE event_time IS NOT NULL
-GROUP BY
-    userId,
-    sessionId,
-    DATE_FORMAT(event_time, 'yyyy-MM-dd HH:mm');
-
-
--- ============================================================================
--- 2. CART ACTIVITY (Session-level aggregation)
--- Real-time cart state per user session
--- Source: cart-events topic (Avro schema)
--- Note: action field contains enum values as strings (ADD, REMOVE, etc.)
--- Aggregated at session level (not time-bucketed) for reliable JOINs
--- ============================================================================
-CREATE VIEW cart_activity AS
-SELECT
-    userId,
-    sessionId,
-    -- Latest cart state (from most recent event)
-    COALESCE(LAST_VALUE(cartTotal), 0.0) AS currentCartTotal,
-    COALESCE(LAST_VALUE(cartItemCount), 0) AS currentCartItems,
-    -- Cart action counts (enum values are uppercase strings)
-    COUNT(*) FILTER (WHERE action = 'ADD') AS cartAdds,
-    COUNT(*) FILTER (WHERE action = 'REMOVE') AS cartRemoves,
-    -- Products added to cart (use CASE WHEN to handle no ADD actions)
-    CASE
-        WHEN COUNT(*) FILTER (WHERE action = 'ADD') > 0
-        THEN ARRAY_DISTINCT(ARRAY_AGG(productId) FILTER (WHERE action = 'ADD'))
-        ELSE ARRAY['']
-    END AS cartProductIds,
-    -- Categories in cart (use CASE WHEN to handle no ADD actions)
-    CASE
-        WHEN COUNT(*) FILTER (WHERE action = 'ADD') > 0
-        THEN ARRAY_DISTINCT(ARRAY_AGG(category) FILTER (WHERE action = 'ADD'))
-        ELSE ARRAY['']
-    END AS cartCategories
-FROM `cart_events_timed`
-WHERE event_time IS NOT NULL
-GROUP BY
-    userId,
-    sessionId;
-
-
--- ============================================================================
--- 3. SESSION ACTIVITY (Session-level aggregation)
--- Session-level user behavior aggregation
--- Source: user-events topic (Avro schema)
--- Note: eventType and pageType are enum values as strings (uppercase)
--- Aggregated at session level (not time-bucketed) for reliable JOINs
--- ============================================================================
-CREATE VIEW session_activity AS
-SELECT
-    userId,
-    sessionId,
-    -- Device info (from first event)
-    COALESCE(FIRST_VALUE(deviceType), 'UNKNOWN') AS deviceType,
-    -- Page navigation
-    COUNT(*) AS totalPageViews,
-    COUNT(DISTINCT pageType) AS uniquePageTypes,
-    -- Engagement signals (enum values are uppercase strings)
-    COUNT(*) FILTER (WHERE eventType = 'PAGE_VIEW' AND pageType = 'PRODUCT') AS productPageViews,
-    COUNT(*) FILTER (WHERE eventType = 'PAGE_VIEW' AND pageType = 'CART') AS cartPageViews,
-    COUNT(*) FILTER (WHERE eventType = 'PAGE_VIEW' AND pageType = 'CHECKOUT') AS checkoutPageViews,
-    -- Session duration in milliseconds (difference between first and last event)
-    COALESCE(
-        CAST(TIMESTAMPDIFF(SECOND, MIN(event_time), MAX(event_time)) * 1000 AS BIGINT),
-        CAST(0 AS BIGINT)
-    ) AS sessionDurationMs
-FROM `user_events_timed`
-WHERE event_time IS NOT NULL
-GROUP BY
-    userId,
-    sessionId;
-
-
--- ============================================================================
--- 4. PRICE PREFERENCE CALCULATION
--- Determines user's price tier based on viewed/carted products
--- ============================================================================
-CREATE VIEW price_preferences AS
-SELECT
-    userId,
-    sessionId,
-    timeBucket,
-    avgProductPrice,
-    CASE
-        WHEN avgProductPrice < 500 THEN 'BUDGET'
-        WHEN avgProductPrice < 2000 THEN 'MID_RANGE'
-        ELSE 'PREMIUM'
-    END AS pricePreference,
-    windowStart,
-    windowEnd
-FROM recent_product_activity;
-
-
--- ============================================================================
--- 5. AI SEARCH ACTIVITY (Session-level aggregation)
--- Aggregates AI chat interactions per user session
--- Source: ai-events topic (Avro schema)
--- AI queries provide STRONG intent signals (explicit search > passive browsing)
--- ============================================================================
-CREATE VIEW `ai_events_timed` AS
+CREATE VIEW IF NOT EXISTS `ai_events_timed` AS
 SELECT
     eventId, userId, sessionId, query, searchType, toolName,
     category, minPrice, maxPrice, minRating, resultsCount,
     returnedProductIds, processingTimeMs,
-    TO_TIMESTAMP(`timestamp`) AS event_time
+    TO_TIMESTAMP_LTZ(
+        CAST(UNIX_TIMESTAMP(SUBSTRING(`timestamp`, 1, 19), 'yyyy-MM-dd''T''HH:mm:ss') AS BIGINT) * 1000,
+        3
+    ) AS event_time
 FROM `ai-events`
 WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
 
-CREATE VIEW ai_search_activity AS
+CREATE VIEW IF NOT EXISTS `order_events_timed` AS
 SELECT
-    userId,
-    sessionId,
-    -- Count of AI chat interactions (strong engagement signal)
-    COUNT(*) AS aiSearchCount,
-    -- Collect AI search queries (explicit intent - more valuable than page views)
-    COALESCE(
-        ARRAY_SLICE(ARRAY_AGG(query), 1, 10),
-        ARRAY['']
-    ) AS aiSearchQueries,
-    -- Categories searched via AI (strong category interest signal)
-    COALESCE(
-        ARRAY_SLICE(ARRAY_DISTINCT(ARRAY_AGG(category)), 1, 5),
-        ARRAY['']
-    ) AS aiSearchCategories,
-    -- Price range preferences from AI searches (explicit budget signal)
-    COALESCE(AVG(minPrice), 0.0) AS aiAvgMinPrice,
-    COALESCE(AVG(maxPrice), 0.0) AS aiAvgMaxPrice,
-    COALESCE(MAX(maxPrice), 0.0) AS aiMaxBudget,
-    -- Tools used (searchProducts = browsing, getProductDetails = high intent)
-    COUNT(*) FILTER (WHERE toolName = 'searchProducts') AS aiProductSearches,
-    COUNT(*) FILTER (WHERE toolName = 'getProductDetails') AS aiProductDetailViews,
-    COUNT(*) FILTER (WHERE toolName = 'compareProducts') AS aiProductComparisons,
-    -- Total products shown by AI (candidates for purchase)
-    COALESCE(SUM(resultsCount), 0) AS aiTotalResultsShown,
-    -- Search types used
-    COUNT(*) FILTER (WHERE searchType = 'HYBRID') AS aiHybridSearches,
-    COUNT(*) FILTER (WHERE searchType = 'FTS') AS aiFtsSearches,
-    -- Average response time (for monitoring)
-    COALESCE(CAST(AVG(processingTimeMs) AS BIGINT), 0) AS aiAvgProcessingMs
-FROM `ai_events_timed`
-WHERE event_time IS NOT NULL
-GROUP BY
-    userId,
-    sessionId;
+    eventId, userId, orderId, items, subtotal, discount, total,
+    paymentMethod, status, shippingCity, shippingState,
+    TO_TIMESTAMP(`timestamp`) AS event_time
+FROM `order-events`
+WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
+
+-- ============================================================================
+-- STEP 2: MATERIALIZED TABLE - Product Activity
+-- Aggregates product views per user/session
+-- Primary key enables upsert mode for downstream JOINs
+-- ============================================================================
+DROP TABLE IF EXISTS `user-product-activity`;
+
+CREATE TABLE `user-product-activity` (
+    userId               STRING NOT NULL,
+    sessionId            STRING NOT NULL,
+    recentProductIds     ARRAY<STRING NOT NULL>,
+    recentCategories     ARRAY<STRING NOT NULL>,
+    recentSearchQueries  ARRAY<STRING NOT NULL>,
+    totalProductViews    BIGINT,
+    avgViewDurationMs    BIGINT,
+    avgProductPrice      DOUBLE,
+    maxViewedPrice       DOUBLE,
+    minViewedPrice       DOUBLE,
+    lastEventTime        TIMESTAMP(3),
+    PRIMARY KEY (userId, sessionId) NOT ENFORCED
+) WITH (
+    'changelog.mode' = 'upsert'
+);
+
+-- ============================================================================
+-- STEP 3: MATERIALIZED TABLE - Cart Activity
+-- Real-time cart state per user/session
+-- ============================================================================
+DROP TABLE IF EXISTS `user-cart-activity`;
+
+CREATE TABLE `user-cart-activity` (
+    userId               STRING NOT NULL,
+    sessionId            STRING NOT NULL,
+    currentCartTotal     DOUBLE,
+    currentCartItems     BIGINT,
+    cartAdds             BIGINT,
+    cartRemoves          BIGINT,
+    cartProductIds       ARRAY<STRING NOT NULL>,
+    cartCategories       ARRAY<STRING NOT NULL>,
+    lastEventTime        TIMESTAMP(3),
+    PRIMARY KEY (userId, sessionId) NOT ENFORCED
+) WITH (
+    'changelog.mode' = 'upsert'
+);
+
+-- ============================================================================
+-- STEP 4: MATERIALIZED TABLE - Session Activity
+-- Session-level user behavior
+-- ============================================================================
+DROP TABLE IF EXISTS `user-session-activity`;
+
+CREATE TABLE `user-session-activity` (
+    userId               STRING NOT NULL,
+    sessionId            STRING NOT NULL,
+    deviceType           STRING,
+    totalPageViews       BIGINT,
+    uniquePageTypes      BIGINT,
+    productPageViews     BIGINT,
+    cartPageViews        BIGINT,
+    checkoutPageViews    BIGINT,
+    sessionDurationMs    BIGINT,
+    lastEventTime        TIMESTAMP(3),
+    PRIMARY KEY (userId, sessionId) NOT ENFORCED
+) WITH (
+    'changelog.mode' = 'upsert'
+);
+
+-- ============================================================================
+-- STEP 5: MATERIALIZED TABLE - AI Search Activity
+-- AI chat interactions (strong intent signals)
+-- ============================================================================
+DROP TABLE IF EXISTS `user-ai-activity`;
+
+CREATE TABLE `user-ai-activity` (
+    userId               STRING NOT NULL,
+    sessionId            STRING NOT NULL,
+    aiSearchCount        BIGINT,
+    aiSearchQueries      ARRAY<STRING NOT NULL>,
+    aiSearchCategories   ARRAY<STRING NOT NULL>,
+    aiAvgMinPrice        DOUBLE,
+    aiAvgMaxPrice        DOUBLE,
+    aiMaxBudget          DOUBLE,
+    aiProductSearches    BIGINT,
+    aiProductDetailViews BIGINT,
+    aiProductComparisons BIGINT,
+    aiTotalResultsShown  BIGINT,
+    lastEventTime        TIMESTAMP(3),
+    PRIMARY KEY (userId, sessionId) NOT ENFORCED
+) WITH (
+    'changelog.mode' = 'upsert'
+);
+
+-- ============================================================================
+-- STEP 6: MATERIALIZED TABLE - Order Activity
+-- Purchase history (highest intent signal - actual conversions)
+-- ============================================================================
+DROP TABLE IF EXISTS `user-order-activity`;
+
+CREATE TABLE `user-order-activity` (
+    userId               STRING NOT NULL,
+    totalOrders          BIGINT,
+    totalSpent           DOUBLE,
+    avgOrderValue        DOUBLE,
+    totalDiscount        DOUBLE,
+    lastOrderTotal       DOUBLE,
+    purchasedCategories  ARRAY<STRING NOT NULL>,
+    purchasedProductIds  ARRAY<STRING NOT NULL>,
+    preferredPaymentMethod STRING,
+    lastOrderStatus      STRING,
+    lastEventTime        TIMESTAMP(3),
+    PRIMARY KEY (userId) NOT ENFORCED
+) WITH (
+    'changelog.mode' = 'upsert'
+);
+
+-- ============================================================================
+-- STEP 7: Set state TTL to prevent unbounded state growth (1 hour)
+-- ============================================================================
+SET 'sql.state-ttl' = '3600000 ms';

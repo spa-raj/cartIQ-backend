@@ -125,24 +125,41 @@ public class UserProfileConsumer {
         return UserProfile.builder()
                 .userId((String) map.get("userId"))
                 .sessionId((String) map.get("sessionId"))
+                // Product activity
                 .recentProductIds((List<String>) map.get("recentProductIds"))
                 .recentCategories((List<String>) map.get("recentCategories"))
                 .recentSearchQueries((List<String>) map.get("recentSearchQueries"))
                 .totalProductViews(toLong(map.get("totalProductViews")))
                 .avgViewDurationMs(toLong(map.get("avgViewDurationMs")))
                 .avgProductPrice(toDouble(map.get("avgProductPrice")))
-                .totalCartAdds(toLong(map.get("totalCartAdds")))
+                // Preferences
+                .pricePreference((String) map.get("pricePreference"))
+                // Cart state
                 .currentCartTotal(toDouble(map.get("currentCartTotal")))
                 .currentCartItems(toLong(map.get("currentCartItems")))
+                .cartAdds(toLong(map.get("cartAdds")))
+                .cartProductIds((List<String>) map.get("cartProductIds"))
+                .cartCategories((List<String>) map.get("cartCategories"))
+                // Session info
                 .deviceType((String) map.get("deviceType"))
                 .sessionDurationMs(toLong(map.get("sessionDurationMs")))
-                .pricePreference((String) map.get("pricePreference"))
+                .totalPageViews(toLong(map.get("totalPageViews")))
+                .productPageViews(toLong(map.get("productPageViews")))
+                .cartPageViews(toLong(map.get("cartPageViews")))
+                .checkoutPageViews(toLong(map.get("checkoutPageViews")))
+                // AI intent signals
                 .aiSearchCount(toLong(map.get("aiSearchCount")))
                 .aiSearchQueries((List<String>) map.get("aiSearchQueries"))
                 .aiSearchCategories((List<String>) map.get("aiSearchCategories"))
                 .aiMaxBudget(toDouble(map.get("aiMaxBudget")))
                 .aiProductSearches(toLong(map.get("aiProductSearches")))
                 .aiProductComparisons(toLong(map.get("aiProductComparisons")))
+                // Order history
+                .totalOrders(toLong(map.get("totalOrders")))
+                .totalSpent(toDouble(map.get("totalSpent")))
+                .avgOrderValue(toDouble(map.get("avgOrderValue")))
+                .lastOrderTotal(toDouble(map.get("lastOrderTotal")))
+                .preferredPaymentMethod((String) map.get("preferredPaymentMethod"))
                 .build();
     }
 
@@ -168,37 +185,64 @@ public class UserProfileConsumer {
                 .recentSearchQueries(mergeLists(incoming.getRecentSearchQueries(), existing.getRecentSearchQueries(), 10))
 
                 // Counts - accumulate (sum)
-                .totalProductViews(existing.getTotalProductViews() + incoming.getTotalProductViews())
-                .totalCartAdds(existing.getTotalCartAdds() + incoming.getTotalCartAdds())
+                .totalProductViews(safeAdd(existing.getTotalProductViews(), incoming.getTotalProductViews()))
 
                 // Averages - use incoming (latest window's average)
                 .avgViewDurationMs(incoming.getAvgViewDurationMs())
                 .avgProductPrice(incoming.getAvgProductPrice() > 0 ? incoming.getAvgProductPrice() : existing.getAvgProductPrice())
-
-                // Cart state - use incoming (current state)
-                .currentCartTotal(incoming.getCurrentCartTotal())
-                .currentCartItems(incoming.getCurrentCartItems())
-
-                // Session info - use incoming (latest)
-                .deviceType(incoming.getDeviceType() != null ? incoming.getDeviceType() : existing.getDeviceType())
-                .sessionDurationMs(Math.max(existing.getSessionDurationMs(), incoming.getSessionDurationMs()))
 
                 // Price preference - use incoming if set, else existing
                 .pricePreference(incoming.getPricePreference() != null && !incoming.getPricePreference().equals("UNKNOWN")
                         ? incoming.getPricePreference()
                         : existing.getPricePreference())
 
+                // Cart state - use incoming (current state)
+                .currentCartTotal(incoming.getCurrentCartTotal())
+                .currentCartItems(incoming.getCurrentCartItems())
+                .cartAdds(safeAdd(existing.getCartAdds(), incoming.getCartAdds()))
+                .cartProductIds(mergeLists(incoming.getCartProductIds(), existing.getCartProductIds(), 20))
+                .cartCategories(mergeLists(incoming.getCartCategories(), existing.getCartCategories(), 10))
+
+                // Session info - use incoming (latest)
+                .deviceType(incoming.getDeviceType() != null ? incoming.getDeviceType() : existing.getDeviceType())
+                .sessionDurationMs(Math.max(safeLong(existing.getSessionDurationMs()), safeLong(incoming.getSessionDurationMs())))
+                .totalPageViews(safeAdd(existing.getTotalPageViews(), incoming.getTotalPageViews()))
+                .productPageViews(safeAdd(existing.getProductPageViews(), incoming.getProductPageViews()))
+                .cartPageViews(safeAdd(existing.getCartPageViews(), incoming.getCartPageViews()))
+                .checkoutPageViews(safeAdd(existing.getCheckoutPageViews(), incoming.getCheckoutPageViews()))
+
                 // AI intent signals - accumulate and merge
-                .aiSearchCount(existing.getAiSearchCount() + incoming.getAiSearchCount())
+                .aiSearchCount(safeAdd(existing.getAiSearchCount(), incoming.getAiSearchCount()))
                 .aiSearchQueries(mergeLists(incoming.getAiSearchQueries(), existing.getAiSearchQueries(), 15))
                 .aiSearchCategories(mergeLists(incoming.getAiSearchCategories(), existing.getAiSearchCategories(), 10))
-                .aiMaxBudget(Math.max(existing.getAiMaxBudget(), incoming.getAiMaxBudget()))
-                .aiProductSearches(existing.getAiProductSearches() + incoming.getAiProductSearches())
-                .aiProductComparisons(existing.getAiProductComparisons() + incoming.getAiProductComparisons())
+                .aiMaxBudget(Math.max(safeDouble(existing.getAiMaxBudget()), safeDouble(incoming.getAiMaxBudget())))
+                .aiProductSearches(safeAdd(existing.getAiProductSearches(), incoming.getAiProductSearches()))
+                .aiProductComparisons(safeAdd(existing.getAiProductComparisons(), incoming.getAiProductComparisons()))
+
+                // Order history - use incoming (lifetime totals from Flink)
+                .totalOrders(incoming.getTotalOrders() != null ? incoming.getTotalOrders() : existing.getTotalOrders())
+                .totalSpent(incoming.getTotalSpent() != null ? incoming.getTotalSpent() : existing.getTotalSpent())
+                .avgOrderValue(incoming.getAvgOrderValue() != null ? incoming.getAvgOrderValue() : existing.getAvgOrderValue())
+                .lastOrderTotal(incoming.getLastOrderTotal() != null ? incoming.getLastOrderTotal() : existing.getLastOrderTotal())
+                .preferredPaymentMethod(incoming.getPreferredPaymentMethod() != null
+                        ? incoming.getPreferredPaymentMethod()
+                        : existing.getPreferredPaymentMethod())
 
                 // Timestamp - always update
                 .lastUpdated(LocalDateTime.now())
                 .build();
+    }
+
+    private Long safeAdd(Long a, Long b) {
+        return safeLong(a) + safeLong(b);
+    }
+
+    private Long safeLong(Long value) {
+        return value != null ? value : 0L;
+    }
+
+    private Double safeDouble(Double value) {
+        return value != null ? value : 0.0;
     }
 
     /**
@@ -244,7 +288,7 @@ public class UserProfileConsumer {
 
     /**
      * Maps GenericRecord from Flink-produced Avro to UserProfile DTO.
-     * Key contains: userId, sessionId, windowBucket
+     * Key contains: userId, sessionId (primary keys)
      * Value contains: all other fields
      */
     private UserProfile mapToUserProfile(GenericRecord key, GenericRecord value) {
@@ -260,15 +304,21 @@ public class UserProfileConsumer {
                 .totalProductViews(getLongField(value, "totalProductViews"))
                 .avgViewDurationMs(getLongField(value, "avgViewDurationMs"))
                 .avgProductPrice(getDoubleField(value, "avgProductPrice"))
+                // Preferences
+                .pricePreference(getStringField(value, "pricePreference"))
                 // Cart state
-                .totalCartAdds(getLongField(value, "totalCartAdds"))
                 .currentCartTotal(getDoubleField(value, "currentCartTotal"))
                 .currentCartItems(getLongField(value, "currentCartItems"))
+                .cartAdds(getLongField(value, "cartAdds"))
+                .cartProductIds(getStringList(value, "cartProductIds"))
+                .cartCategories(getStringList(value, "cartCategories"))
                 // Session info
                 .deviceType(getStringField(value, "deviceType"))
                 .sessionDurationMs(getLongField(value, "sessionDurationMs"))
-                // Preferences
-                .pricePreference(getStringField(value, "pricePreference"))
+                .totalPageViews(getLongField(value, "totalPageViews"))
+                .productPageViews(getLongField(value, "productPageViews"))
+                .cartPageViews(getLongField(value, "cartPageViews"))
+                .checkoutPageViews(getLongField(value, "checkoutPageViews"))
                 // AI intent signals
                 .aiSearchCount(getLongField(value, "aiSearchCount"))
                 .aiSearchQueries(getStringList(value, "aiSearchQueries"))
@@ -276,6 +326,12 @@ public class UserProfileConsumer {
                 .aiMaxBudget(getDoubleField(value, "aiMaxBudget"))
                 .aiProductSearches(getLongField(value, "aiProductSearches"))
                 .aiProductComparisons(getLongField(value, "aiProductComparisons"))
+                // Order history (HIGHEST intent)
+                .totalOrders(getLongField(value, "totalOrders"))
+                .totalSpent(getDoubleField(value, "totalSpent"))
+                .avgOrderValue(getDoubleField(value, "avgOrderValue"))
+                .lastOrderTotal(getDoubleField(value, "lastOrderTotal"))
+                .preferredPaymentMethod(getStringField(value, "preferredPaymentMethod"))
                 // Metadata
                 .lastUpdated(LocalDateTime.now())
                 .build();

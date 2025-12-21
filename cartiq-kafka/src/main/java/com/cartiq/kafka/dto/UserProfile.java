@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * Cached user profile for personalized recommendations.
  * Stored in Redis with TTL, updated by Kafka consumer from user-profiles topic.
- * Fields match Flink SQL output from docs/flink-sql/02-user-profiles.sql
+ * Fields match Flink SQL output from docs/flink-sql/03-user-profiles.sql
  */
 @Data
 @Builder
@@ -31,17 +31,23 @@ public class UserProfile implements Serializable {
     private Long avgViewDurationMs;
     private Double avgProductPrice;
 
+    // Preferences (computed by Flink from browsing + AI signals)
+    private String pricePreference;             // BUDGET, MID_RANGE, PREMIUM
+
     // Cart State
-    private Long totalCartAdds;
     private Double currentCartTotal;
     private Long currentCartItems;
+    private Long cartAdds;
+    private List<String> cartProductIds;
+    private List<String> cartCategories;
 
     // Session Info
     private String deviceType;
     private Long sessionDurationMs;
-
-    // Preferences (computed by Flink)
-    private String pricePreference;             // BUDGET, MID_RANGE, PREMIUM
+    private Long totalPageViews;
+    private Long productPageViews;
+    private Long cartPageViews;
+    private Long checkoutPageViews;
 
     // AI Intent Signals (strong intent from chat interactions)
     private Long aiSearchCount;
@@ -50,6 +56,13 @@ public class UserProfile implements Serializable {
     private Double aiMaxBudget;
     private Long aiProductSearches;
     private Long aiProductComparisons;
+
+    // Order History (HIGHEST intent - actual purchases)
+    private Long totalOrders;
+    private Double totalSpent;
+    private Double avgOrderValue;
+    private Double lastOrderTotal;
+    private String preferredPaymentMethod;
 
     // Metadata
     private LocalDateTime lastUpdated;

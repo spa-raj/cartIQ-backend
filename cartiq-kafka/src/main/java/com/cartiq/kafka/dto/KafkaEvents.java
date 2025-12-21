@@ -17,7 +17,9 @@ import java.util.List;
  * - product-views: ProductViewEvent
  * - cart-events: CartEvent
  * - order-events: OrderEvent
- * - user-profiles: UserProfileEvent (output from Flink)
+ * - ai-events: AISearchEvent
+ *
+ * Note: user-profiles topic output is consumed via UserProfile.java (not here)
  */
 public class KafkaEvents {
 
@@ -63,22 +65,6 @@ public class KafkaEvents {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class SearchEvent {
-        private String eventId;
-        private String userId;
-        private String sessionId;
-        private String query;
-        private String categoryFilter;
-        private String priceRangeFilter;
-        private Integer resultsCount;
-        private List<String> clickedProductIds;
-        private String timestamp;       // ISO-8601 format for Avro
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class CartEvent {
         private String eventId;
         private String userId;
@@ -92,24 +78,6 @@ public class KafkaEvents {
         private Double cartTotal;
         private Integer cartItemCount;
         private String timestamp;       // ISO-8601 format for Avro
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class PageViewEvent {
-        private String eventId;
-        private String userId;
-        private String sessionId;
-        private String pageType;        // enum as string for Avro
-        private String pageUrl;
-        private String productId;
-        private String category;
-        private String deviceType;      // enum as string for Avro
-        private String referrer;
-        private String timestamp;       // ISO-8601 format for Avro
-        private Long durationMs;
     }
 
     // ==================== TRANSACTION EVENTS ====================
@@ -173,116 +141,5 @@ public class KafkaEvents {
         private List<String> returnedProductIds;
         private long processingTimeMs;
         private String timestamp;               // ISO-8601 format
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ChatInputEvent {
-        private String eventId;
-        private String userId;
-        private String sessionId;
-        private String message;
-        private List<String> recentlyViewedProductIds;
-        private List<String> recentCategories;
-        private List<String> cartProductIds;
-        private Double cartTotal;
-        private UserContext userContext;
-        private String timestamp;       // ISO-8601 format for Avro
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class UserContext {
-        private String pricePreference;     // budget, mid, premium
-        private List<String> preferredCategories;
-        private List<String> purchaseHistory;   // category summary
-        private String currentPage;
-        private Integer sessionDurationMinutes;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ChatResponseEvent {
-        private String eventId;
-        private String userId;
-        private String sessionId;
-        private String originalQuery;
-        private String response;
-        private List<ProductRecommendation> recommendations;
-        private Double confidenceScore;
-        private Long processingTimeMs;
-        private String modelUsed;
-        private String timestamp;       // ISO-8601 format for Avro
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class ProductRecommendation {
-        private String productId;
-        private String productName;
-        private Double price;
-        private String category;
-        private Double relevanceScore;
-        private String reason;
-    }
-
-    // ==================== USER PROFILE EVENTS (from Flink user-profiles topic) ====================
-
-    /**
-     * User profile update event from Flink's user-profiles topic.
-     * Contains aggregated user behavior for personalization.
-     * Schema matches docs/flink-sql/02-user-profiles.sql output.
-     */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class UserProfileUpdateEvent {
-        // Primary keys
-        private String userId;
-        private String sessionId;
-        private String windowBucket;
-
-        // Metadata
-        private String eventId;
-        private String windowStart;
-        private String windowEnd;
-        private String lastUpdated;             // ISO-8601 format
-
-        // Product activity
-        private List<String> recentProductIds;
-        private List<String> recentCategories;
-        private List<String> recentSearchQueries;
-        private Long totalProductViews;
-        private Long avgViewDurationMs;
-        private Double avgProductPrice;
-
-        // Cart state
-        private Long totalCartAdds;
-        private Double currentCartTotal;
-        private Long currentCartItems;
-
-        // Session info
-        private Long sessionDurationMs;
-        private String deviceType;
-
-        // Computed preference
-        private String pricePreference;         // BUDGET, MID_RANGE, PREMIUM
-
-        // AI search activity (strong intent signals from chat)
-        private Long aiSearchCount;
-        private List<String> aiSearchQueries;
-        private List<String> aiSearchCategories;
-        private Double aiMaxBudget;
-        private Long aiProductSearches;
-        private Long aiProductComparisons;
     }
 }
