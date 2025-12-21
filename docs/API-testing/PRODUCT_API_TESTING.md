@@ -489,11 +489,28 @@ Returns paginated products from the specified brand.
 
 ### 4.6 Search Products
 
-**GET** `{{base_url}}/api/products/search?q={query}`
+**GET** `{{base_url}}/api/products/search`
 
-**Example:** `GET http://localhost:8082/api/products/search?q=iphone&page=0&size=20`
+Searches product name, description, and brand with optional price and rating filters.
 
-Searches product name, description, and brand.
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `q` | String | Yes | Search query text |
+| `minPrice` | BigDecimal | No | Minimum price filter (inclusive) |
+| `maxPrice` | BigDecimal | No | Maximum price filter (inclusive) |
+| `minRating` | BigDecimal | No | Minimum rating filter (inclusive) |
+| `page` | int | No | Page number (default: 0) |
+| `size` | int | No | Items per page (default: 20) |
+
+**Examples:**
+```
+GET /api/products/search?q=iphone&page=0&size=20
+GET /api/products/search?q=iphone&maxPrice=100000
+GET /api/products/search?q=laptop&minPrice=50000&maxPrice=150000
+GET /api/products/search?q=headphones&minRating=4.0
+GET /api/products/search?q=phone&minPrice=10000&maxPrice=50000&minRating=4.5
+```
 
 **Expected Response (200 OK):**
 ```json
@@ -506,11 +523,21 @@ Searches product name, description, and brand.
             "description": "Latest Apple iPhone with A17 Pro chip",
             "price": 999.99,
             "brand": "Apple",
+            "rating": 4.8,
             "inStock": true
         }
     ],
     "totalElements": 5,
     "totalPages": 1
+}
+```
+
+**Error Response (400 Bad Request) - Invalid Price Range:**
+```json
+{
+    "timestamp": "2025-12-07T10:30:00",
+    "error": "Minimum price cannot exceed maximum price",
+    "errorCode": "INVALID_PRICE_RANGE"
 }
 ```
 
@@ -1015,8 +1042,14 @@ curl -X GET http://localhost:8082/api/categories/tree
 # Get all products (paginated)
 curl -X GET "http://localhost:8082/api/products?page=0&size=10"
 
-# Search products
+# Search products (text only)
 curl -X GET "http://localhost:8082/api/products/search?q=iphone"
+
+# Search products with price filter
+curl -X GET "http://localhost:8082/api/products/search?q=iphone&maxPrice=100000"
+
+# Search products with price range and rating filter
+curl -X GET "http://localhost:8082/api/products/search?q=laptop&minPrice=50000&maxPrice=150000&minRating=4.0"
 
 # Filter by price range
 curl -X GET "http://localhost:8082/api/products/price-range?minPrice=100&maxPrice=500"

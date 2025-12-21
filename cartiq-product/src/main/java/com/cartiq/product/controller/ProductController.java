@@ -55,7 +55,14 @@ public class ProductController {
     @GetMapping("/search")
     public ResponseEntity<Page<ProductDTO>> searchProducts(
             @RequestParam String q,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice,
+            @RequestParam(required = false) BigDecimal minRating,
             @PageableDefault(size = 20) Pageable pageable) {
+        // Use filtered search if any filter is provided, otherwise use simple search
+        if (minPrice != null || maxPrice != null || minRating != null) {
+            return ResponseEntity.ok(productService.searchWithFilters(q, minPrice, maxPrice, minRating, pageable));
+        }
         return ResponseEntity.ok(productService.searchProducts(q, pageable));
     }
 
