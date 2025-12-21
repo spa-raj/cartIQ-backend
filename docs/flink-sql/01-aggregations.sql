@@ -54,6 +54,22 @@ SELECT
 FROM `order-events`
 WHERE `timestamp` IS NOT NULL AND `timestamp` <> '';
 
+-- Flattened view of order items (UNNEST nested items array)
+-- Note: UNNEST column order must match Avro schema field order (alphabetical)
+CREATE VIEW IF NOT EXISTS `order_items_flattened` AS
+SELECT
+    o.userId,
+    o.orderId,
+    o.total,
+    o.discount,
+    o.paymentMethod,
+    o.status,
+    o.event_time,
+    i.category,
+    i.productId
+FROM `order_events_timed` o
+CROSS JOIN UNNEST(o.items) AS i(category, price, productId, productName, quantity);
+
 -- ============================================================================
 -- STEP 2: MATERIALIZED TABLE - Product Activity
 -- Aggregates product views per user/session
@@ -124,12 +140,14 @@ CREATE TABLE `user-session-activity` (
 -- ============================================================================
 -- STEP 5: MATERIALIZED TABLE - AI Search Activity
 -- AI chat interactions (strong intent signals)
+-- Note: Aggregated at USER level (not session) because:
+--   1. AI chat sessionId may differ from browser sessionId
+--   2. AI search intent transcends individual sessions
 -- ============================================================================
 DROP TABLE IF EXISTS `user-ai-activity`;
 
 CREATE TABLE `user-ai-activity` (
     userId               STRING NOT NULL,
-    sessionId            STRING NOT NULL,
     aiSearchCount        BIGINT,
     aiSearchQueries      ARRAY<STRING NOT NULL>,
     aiSearchCategories   ARRAY<STRING NOT NULL>,
@@ -141,7 +159,7 @@ CREATE TABLE `user-ai-activity` (
     aiProductComparisons BIGINT,
     aiTotalResultsShown  BIGINT,
     lastEventTime        TIMESTAMP(3),
-    PRIMARY KEY (userId, sessionId) NOT ENFORCED
+    PRIMARY KEY (userId) NOT ENFORCED
 ) WITH (
     'changelog.mode' = 'upsert'
 );

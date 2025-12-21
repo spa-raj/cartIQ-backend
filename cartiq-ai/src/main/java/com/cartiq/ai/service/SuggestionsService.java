@@ -218,45 +218,77 @@ public class SuggestionsService {
 
     /**
      * Strategy 1: AI Intent Products
-     * Uses explicit signals from AI chat (category, budget)
+     * Uses explicit signals from AI chat (category, budget).
+     * Searches each category separately for better semantic matching.
      */
     private List<SuggestedProduct> getAIIntentProducts(UserProfile profile, int limit) {
         try {
             List<String> categories = profile.getAiSearchCategories();
             Double maxBudget = profile.getAiMaxBudget();
 
-            // Build a semantic query from AI interactions
-            String query = categories != null
-                    ? categories.stream().filter(c -> c != null && !c.isBlank()).collect(Collectors.joining(" "))
-                    : "";
-
-            if (query.isBlank()) {
+            if (categories == null || categories.isEmpty()) {
                 return List.of();
             }
 
-            // Use vector search with price filter
+            // Filter valid categories
+            List<String> validCategories = categories.stream()
+                    .filter(c -> c != null && !c.isBlank())
+                    .distinct()
+                    .toList();
+
+            if (validCategories.isEmpty()) {
+                return List.of();
+            }
+
+            // Build price filter
             Map<String, Object> filters = new HashMap<>();
             if (maxBudget != null && maxBudget > 0) {
                 filters.put("maxPrice", maxBudget);
             }
 
-            List<SearchResult> results = vectorSearchService.search(query, limit, filters);
+            // Search each category separately and collect results
+            List<SuggestedProduct> allResults = new ArrayList<>();
+            Set<UUID> seenProductIds = new HashSet<>();
 
-            // Convert SearchResults to ProductDTOs
-            List<UUID> productIds = results.stream()
-                    .map(r -> UUID.fromString(r.getProductId()))
-                    .toList();
+            // Distribute limit across categories (at least 2 per category, more for fewer categories)
+            int perCategoryLimit = Math.max(2, (int) Math.ceil((double) limit / validCategories.size()));
 
-            List<ProductDTO> products = productService.getProductsByIds(productIds);
+            for (String category : validCategories) {
+                if (allResults.size() >= limit) {
+                    break;
+                }
 
-            // Context for reason: first category or query
-            String context = categories != null && !categories.isEmpty()
-                    ? categories.stream().filter(c -> c != null && !c.isBlank()).findFirst().orElse(query)
-                    : query;
+                log.debug("AI intent: searching for category '{}' with limit {}", category, perCategoryLimit);
 
-            return products.stream()
-                    .map(p -> SuggestedProduct.fromStrategy(p, "ai_intent", context))
-                    .toList();
+                List<SearchResult> results = vectorSearchService.search(category, perCategoryLimit, filters);
+
+                // Convert to ProductDTOs and filter duplicates
+                List<UUID> productIds = results.stream()
+                        .map(r -> UUID.fromString(r.getProductId()))
+                        .filter(id -> !seenProductIds.contains(id))
+                        .toList();
+
+                if (productIds.isEmpty()) {
+                    continue;
+                }
+
+                List<ProductDTO> products = productService.getProductsByIds(productIds);
+
+                // Add products with category-specific context
+                for (ProductDTO product : products) {
+                    if (allResults.size() >= limit) {
+                        break;
+                    }
+                    if (seenProductIds.add(product.getId())) {
+                        allResults.add(SuggestedProduct.fromStrategy(product, "ai_intent", category));
+                    }
+                }
+            }
+
+            log.debug("AI intent: collected {} products from {} categories",
+                    allResults.size(), validCategories.size());
+
+            return allResults;
 
         } catch (Exception e) {
             log.warn("AI intent strategy failed: {}", e.getMessage());

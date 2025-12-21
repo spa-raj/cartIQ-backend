@@ -116,8 +116,9 @@ public class VectorSearchService {
 
     /**
      * Search by embedding vector using REST API.
+     * Accepts List of any Number type (Float or Double) to handle Redis cache deserialization.
      */
-    public List<SearchResult> searchByVector(List<Float> embedding, int topK, Map<String, Object> filters) {
+    public List<SearchResult> searchByVector(List<? extends Number> embedding, int topK, Map<String, Object> filters) {
         if (!isAvailable()) {
             return List.of();
         }
@@ -142,9 +143,9 @@ public class VectorSearchService {
             ObjectNode datapoint = objectMapper.createObjectNode();
             datapoint.put("datapoint_id", "query-" + UUID.randomUUID());
 
-            // Add feature vector
+            // Add feature vector - handle both Float and Double (Redis deserializes as Double)
             ArrayNode featureVector = objectMapper.createArrayNode();
-            for (Float value : embedding) {
+            for (Number value : embedding) {
                 featureVector.add(value.doubleValue());
             }
             datapoint.set("feature_vector", featureVector);

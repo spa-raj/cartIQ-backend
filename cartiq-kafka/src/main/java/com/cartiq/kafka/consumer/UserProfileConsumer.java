@@ -165,9 +165,11 @@ public class UserProfileConsumer {
 
     /**
      * Merge incoming profile with existing cached profile.
-     * - Lists are prepended (new items first) and deduplicated, limited to max size
-     * - Counts are accumulated
-     * - Latest values win for single-value fields
+     *
+     * IMPORTANT: Flink uses upsert mode, so incoming values are CURRENT TOTALS (not deltas).
+     * - Counts from Flink: use incoming directly (already aggregated)
+     * - Lists: merge and deduplicate (Flink only has current session's list)
+     * - Single values: use incoming (latest state)
      */
     private UserProfile mergeProfiles(UserProfile existing, UserProfile incoming) {
         if (existing == null) {
@@ -179,15 +181,16 @@ public class UserProfileConsumer {
                 .userId(incoming.getUserId())
                 .sessionId(incoming.getSessionId())
 
-                // Lists - prepend new items, deduplicate, limit size
+                // Lists - merge to preserve cross-session history
+                // Flink only tracks current session, so we merge with cached history
                 .recentProductIds(mergeLists(incoming.getRecentProductIds(), existing.getRecentProductIds(), 20))
                 .recentCategories(mergeLists(incoming.getRecentCategories(), existing.getRecentCategories(), 10))
                 .recentSearchQueries(mergeLists(incoming.getRecentSearchQueries(), existing.getRecentSearchQueries(), 10))
 
-                // Counts - accumulate (sum)
-                .totalProductViews(safeAdd(existing.getTotalProductViews(), incoming.getTotalProductViews()))
+                // Counts - use incoming (Flink already aggregated, don't double-count)
+                .totalProductViews(useIncomingOrExisting(incoming.getTotalProductViews(), existing.getTotalProductViews()))
 
-                // Averages - use incoming (latest window's average)
+                // Averages - use incoming (latest)
                 .avgViewDurationMs(incoming.getAvgViewDurationMs())
                 .avgProductPrice(incoming.getAvgProductPrice() > 0 ? incoming.getAvgProductPrice() : existing.getAvgProductPrice())
 
@@ -196,35 +199,39 @@ public class UserProfileConsumer {
                         ? incoming.getPricePreference()
                         : existing.getPricePreference())
 
-                // Cart state - use incoming (current state)
+                // Cart state - use incoming (current state from Flink)
                 .currentCartTotal(incoming.getCurrentCartTotal())
                 .currentCartItems(incoming.getCurrentCartItems())
-                .cartAdds(safeAdd(existing.getCartAdds(), incoming.getCartAdds()))
+                .cartAdds(useIncomingOrExisting(incoming.getCartAdds(), existing.getCartAdds()))
                 .cartProductIds(mergeLists(incoming.getCartProductIds(), existing.getCartProductIds(), 20))
                 .cartCategories(mergeLists(incoming.getCartCategories(), existing.getCartCategories(), 10))
 
-                // Session info - use incoming (latest)
+                // Session info - use incoming (Flink aggregated)
                 .deviceType(incoming.getDeviceType() != null ? incoming.getDeviceType() : existing.getDeviceType())
-                .sessionDurationMs(Math.max(safeLong(existing.getSessionDurationMs()), safeLong(incoming.getSessionDurationMs())))
-                .totalPageViews(safeAdd(existing.getTotalPageViews(), incoming.getTotalPageViews()))
-                .productPageViews(safeAdd(existing.getProductPageViews(), incoming.getProductPageViews()))
-                .cartPageViews(safeAdd(existing.getCartPageViews(), incoming.getCartPageViews()))
-                .checkoutPageViews(safeAdd(existing.getCheckoutPageViews(), incoming.getCheckoutPageViews()))
+                .sessionDurationMs(useIncomingOrExisting(incoming.getSessionDurationMs(), existing.getSessionDurationMs()))
+                .totalPageViews(useIncomingOrExisting(incoming.getTotalPageViews(), existing.getTotalPageViews()))
+                .productPageViews(useIncomingOrExisting(incoming.getProductPageViews(), existing.getProductPageViews()))
+                .cartPageViews(useIncomingOrExisting(incoming.getCartPageViews(), existing.getCartPageViews()))
+                .checkoutPageViews(useIncomingOrExisting(incoming.getCheckoutPageViews(), existing.getCheckoutPageViews()))
 
-                // AI intent signals - accumulate and merge
-                .aiSearchCount(safeAdd(existing.getAiSearchCount(), incoming.getAiSearchCount()))
+                // AI intent signals - use incoming for counts, merge lists
+                .aiSearchCount(useIncomingOrExisting(incoming.getAiSearchCount(), existing.getAiSearchCount()))
                 .aiSearchQueries(mergeLists(incoming.getAiSearchQueries(), existing.getAiSearchQueries(), 15))
                 .aiSearchCategories(mergeLists(incoming.getAiSearchCategories(), existing.getAiSearchCategories(), 10))
                 .aiMaxBudget(Math.max(safeDouble(existing.getAiMaxBudget()), safeDouble(incoming.getAiMaxBudget())))
-                .aiProductSearches(safeAdd(existing.getAiProductSearches(), incoming.getAiProductSearches()))
-                .aiProductComparisons(safeAdd(existing.getAiProductComparisons(), incoming.getAiProductComparisons()))
+                .aiProductSearches(useIncomingOrExisting(incoming.getAiProductSearches(), existing.getAiProductSearches()))
+                .aiProductComparisons(useIncomingOrExisting(incoming.getAiProductComparisons(), existing.getAiProductComparisons()))
 
                 // Order history - use incoming (lifetime totals from Flink)
-                .totalOrders(incoming.getTotalOrders() != null ? incoming.getTotalOrders() : existing.getTotalOrders())
-                .totalSpent(incoming.getTotalSpent() != null ? incoming.getTotalSpent() : existing.getTotalSpent())
-                .avgOrderValue(incoming.getAvgOrderValue() != null ? incoming.getAvgOrderValue() : existing.getAvgOrderValue())
-                .lastOrderTotal(incoming.getLastOrderTotal() != null ? incoming.getLastOrderTotal() : existing.getLastOrderTotal())
+                .totalOrders(useIncomingOrExisting(incoming.getTotalOrders(), existing.getTotalOrders()))
+                .totalSpent(incoming.getTotalSpent() != null && incoming.getTotalSpent() > 0
+                        ? incoming.getTotalSpent() : existing.getTotalSpent())
+                .avgOrderValue(incoming.getAvgOrderValue() != null && incoming.getAvgOrderValue() > 0
+                        ? incoming.getAvgOrderValue() : existing.getAvgOrderValue())
+                .lastOrderTotal(incoming.getLastOrderTotal() != null && incoming.getLastOrderTotal() > 0
+                        ? incoming.getLastOrderTotal() : existing.getLastOrderTotal())
                 .preferredPaymentMethod(incoming.getPreferredPaymentMethod() != null
+                        && !"NONE".equals(incoming.getPreferredPaymentMethod())
                         ? incoming.getPreferredPaymentMethod()
                         : existing.getPreferredPaymentMethod())
 
@@ -233,8 +240,15 @@ public class UserProfileConsumer {
                 .build();
     }
 
-    private Long safeAdd(Long a, Long b) {
-        return safeLong(a) + safeLong(b);
+    /**
+     * Use incoming value if it's non-null and > 0, otherwise keep existing.
+     * For Flink upsert mode: incoming is the current total, not a delta.
+     */
+    private Long useIncomingOrExisting(Long incoming, Long existing) {
+        if (incoming != null && incoming > 0) {
+            return incoming;
+        }
+        return existing != null ? existing : 0L;
     }
 
     private Long safeLong(Long value) {

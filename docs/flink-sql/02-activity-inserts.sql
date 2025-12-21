@@ -78,13 +78,14 @@ GROUP BY userId, sessionId;
 
 -- ============================================================================
 -- JOB 4: AI Search Activity Aggregation
--- Aggregates AI chat interactions per session into materialized table
+-- Aggregates AI chat interactions per USER into materialized table
 -- These are STRONG intent signals - explicit queries > passive browsing
+-- Note: Aggregated at USER level (not session) because AI chat sessionId
+--       may differ from browser sessionId used by other events
 -- ============================================================================
 INSERT INTO `user-ai-activity`
 SELECT
     userId,
-    sessionId,
     COUNT(*) AS aiSearchCount,
     COALESCE(ARRAY_SLICE(ARRAY_AGG(query), 1, 10), ARRAY['']) AS aiSearchQueries,
     COALESCE(ARRAY_SLICE(ARRAY_DISTINCT(ARRAY_AGG(category)), 1, 5), ARRAY['']) AS aiSearchCategories,
@@ -98,28 +99,35 @@ SELECT
     MAX(event_time) AS lastEventTime
 FROM `ai_events_timed`
 WHERE event_time IS NOT NULL
-GROUP BY userId, sessionId;
+GROUP BY userId;
 
 -- ============================================================================
 -- JOB 5: Order Activity Aggregation
 -- Aggregates purchase history per user (HIGHEST intent signal - actual conversions)
 -- Note: Aggregated at USER level (not session) for lifetime purchase history
+-- Uses order_items_flattened view (created in 01-aggregations.sql) for nested items
 -- ============================================================================
 INSERT INTO `user-order-activity`
 SELECT
     userId,
-    COUNT(*) AS totalOrders,
+    COUNT(DISTINCT orderId) AS totalOrders,
     COALESCE(SUM(total), 0.0) AS totalSpent,
     COALESCE(AVG(total), 0.0) AS avgOrderValue,
     COALESCE(SUM(discount), 0.0) AS totalDiscount,
     COALESCE(LAST_VALUE(total), 0.0) AS lastOrderTotal,
-    -- Note: For categories/products from nested items, would need UNNEST
-    -- Using placeholder arrays for now - can enhance with item-level flattening
-    ARRAY[''] AS purchasedCategories,
-    ARRAY[''] AS purchasedProductIds,
+    -- Extract unique categories from purchased items
+    COALESCE(
+        ARRAY_SLICE(ARRAY_DISTINCT(ARRAY_AGG(category)), 1, 10),
+        ARRAY['']
+    ) AS purchasedCategories,
+    -- Extract unique product IDs from purchased items
+    COALESCE(
+        ARRAY_SLICE(ARRAY_DISTINCT(ARRAY_AGG(productId)), 1, 20),
+        ARRAY['']
+    ) AS purchasedProductIds,
     COALESCE(LAST_VALUE(paymentMethod), 'UNKNOWN') AS preferredPaymentMethod,
     COALESCE(LAST_VALUE(status), 'UNKNOWN') AS lastOrderStatus,
     MAX(event_time) AS lastEventTime
-FROM `order_events_timed`
+FROM `order_items_flattened`
 WHERE event_time IS NOT NULL
 GROUP BY userId;

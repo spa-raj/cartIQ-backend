@@ -153,10 +153,10 @@ LEFT JOIN `user-session-activity` s
     ON p.userId = s.userId
     AND p.sessionId = s.sessionId
 
--- LEFT JOIN AI search activity
+-- LEFT JOIN AI search activity (user-level, not session-level)
+-- AI chat sessionId may differ from browser sessionId
 LEFT JOIN `user-ai-activity` a
     ON p.userId = a.userId
-    AND p.sessionId = a.sessionId
 
 -- LEFT JOIN order activity (user-level, not session-level)
 LEFT JOIN `user-order-activity` o
