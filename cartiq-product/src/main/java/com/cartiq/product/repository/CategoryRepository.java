@@ -43,4 +43,24 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
      * Find all categories at a specific level.
      */
     List<Category> findByLevelAndActiveTrue(Integer level);
+
+    /**
+     * Count products in a category.
+     */
+    @Query("SELECT COUNT(p) FROM Product p WHERE p.category.id = :categoryId AND p.status = 'ACTIVE'")
+    Long countProductsByCategoryId(@org.springframework.data.repository.query.Param("categoryId") UUID categoryId);
+
+    /**
+     * Get product counts for all categories in a single query.
+     * Returns list of [categoryId, count] pairs.
+     */
+    @Query("SELECT p.category.id, COUNT(p) FROM Product p WHERE p.status = 'ACTIVE' GROUP BY p.category.id")
+    List<Object[]> getProductCountsByCategory();
+
+    /**
+     * Find all descendant categories (subcategories at any level) using recursive path matching.
+     * Uses the 'path' column which stores the category hierarchy.
+     */
+    @Query("SELECT c.id FROM Category c WHERE c.path LIKE CONCAT(:parentPath, ' >> %') AND c.active = true")
+    List<UUID> findDescendantCategoryIds(@org.springframework.data.repository.query.Param("parentPath") String parentPath);
 }

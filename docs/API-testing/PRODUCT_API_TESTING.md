@@ -467,13 +467,57 @@ Returns the same structure as Get by ID.
 
 ---
 
-### 4.4 Get Products by Category
+### 4.4 Get Products by Category (Hierarchical)
 
 **GET** `{{base_url}}/api/products/category/{categoryId}`
 
+**Query Parameters:**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `page` | 0 | Page number (0-indexed) |
+| `size` | 20 | Items per page |
+| `sort` | `rating,desc` | Sort field and direction |
+
 **Example:** `GET http://localhost:8082/api/products/category/550e8400-e29b-41d4-a716-446655440010?page=0&size=20`
 
-Returns paginated products in the specified category.
+Returns paginated products in the specified category **AND all its subcategories**.
+
+**Important:** This endpoint is hierarchical - querying a parent category returns products from all descendant categories:
+- `GET /api/products/category/{electronics-id}` returns products from:
+  - Electronics (direct)
+  - ├── Mobiles & Accessories
+  - │   └── Smartphones (products here)
+  - ├── Headphones, Earbuds & Accessories
+  - │   ├── Headphones
+  - │   │   ├── On-Ear (products here)
+  - │   │   └── Over-Ear (products here)
+  - └── ...and all other descendants
+
+**Expected Response (200 OK):**
+```json
+{
+    "content": [
+        {
+            "id": "660e8400-e29b-41d4-a716-446655440000",
+            "name": "iPhone 15 Pro 256GB",
+            "price": 999.99,
+            "categoryName": "Smartphones",
+            "rating": 4.8
+        },
+        {
+            "id": "660e8400-e29b-41d4-a716-446655440001",
+            "name": "Sony WH-1000XM5",
+            "price": 349.99,
+            "categoryName": "Over-Ear",
+            "rating": 4.7
+        }
+    ],
+    "totalElements": 150,
+    "totalPages": 8
+}
+```
+
+**Note:** The `productCount` in category responses also includes products from all subcategories.
 
 ---
 
@@ -557,13 +601,39 @@ GET /api/products/search?q=phone&minPrice=10000&maxPrice=50000&minRating=4.5
 
 ---
 
-### 4.8 Get Featured Products
+### 4.8 Get Featured Products (Diverse & Randomized)
 
 **GET** `{{base_url}}/api/products/featured`
 
+**Query Parameters:**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `page` | 0 | Page number (0-indexed) |
+| `size` | 10 | Items per page |
+
 **Example:** `GET http://localhost:8082/api/products/featured?size=10`
 
-Returns products marked as `featured: true`.
+Returns featured products with **category diversity and randomization**:
+- Products are selected from different categories (round-robin)
+- Products within each category are shuffled randomly
+- Each request may return products in different order
+
+**Why Diversity?** Without diversity, featured products could all be from one category (e.g., all essential oils). This ensures a varied product mix.
+
+**Expected Response (200 OK):**
+```json
+{
+    "content": [
+        {"name": "iPhone 15 Pro", "categoryName": "Smartphones"},
+        {"name": "Nike Air Max", "categoryName": "Sports Shoes"},
+        {"name": "Sony Headphones", "categoryName": "On-Ear"},
+        {"name": "Samsung TV", "categoryName": "Televisions"},
+        {"name": "Dyson Vacuum", "categoryName": "Home Appliances"}
+    ],
+    "totalElements": 500,
+    "totalPages": 50
+}
+```
 
 ---
 

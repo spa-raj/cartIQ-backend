@@ -50,9 +50,31 @@ public class ProductService {
         return ProductDTO.fromEntity(product);
     }
 
+    /**
+     * Get products by category ID, including products from all subcategories.
+     * This allows parent categories like "Electronics" to show products from
+     * child categories like "Headphones" -> "On-Ear".
+     */
     @Transactional(readOnly = true)
     public Page<ProductDTO> getProductsByCategory(UUID categoryId, Pageable pageable) {
-        return productRepository.findByCategoryIdAndStatus(categoryId, ProductStatus.ACTIVE, pageable)
+        // Get the category to find its path
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> ProductException.categoryNotFound(categoryId.toString()));
+
+        // Collect this category + all descendant category IDs
+        List<UUID> allCategoryIds = new ArrayList<>();
+        allCategoryIds.add(categoryId);
+
+        // Find all descendant categories using path prefix matching
+        if (category.getPath() != null) {
+            List<UUID> descendantIds = categoryRepository.findDescendantCategoryIds(category.getPath());
+            allCategoryIds.addAll(descendantIds);
+        }
+
+        log.debug("Category search: {} includes {} total categories (with descendants)",
+                category.getName(), allCategoryIds.size());
+
+        return productRepository.findByCategoryIdInAndStatusActive(allCategoryIds, pageable)
                 .map(ProductDTO::fromEntity);
     }
 

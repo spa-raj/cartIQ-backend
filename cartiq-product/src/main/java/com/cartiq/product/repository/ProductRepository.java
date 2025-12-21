@@ -29,6 +29,12 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     Page<Product> findByCategoryIdAndStatus(UUID categoryId, ProductStatus status, Pageable pageable);
 
+    /**
+     * Find products by multiple category IDs (for hierarchical category queries).
+     */
+    @Query("SELECT p FROM Product p WHERE p.category.id IN :categoryIds AND p.status = 'ACTIVE' ORDER BY p.rating DESC NULLS LAST")
+    Page<Product> findByCategoryIdInAndStatusActive(@Param("categoryIds") List<UUID> categoryIds, Pageable pageable);
+
     Page<Product> findByBrand(String brand, Pageable pageable);
 
     @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' AND p.featured = true")
