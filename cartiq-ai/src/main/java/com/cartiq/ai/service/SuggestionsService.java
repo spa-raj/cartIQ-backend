@@ -202,12 +202,22 @@ public class SuggestionsService {
     }
 
     private boolean hasAIIntent(UserProfile profile) {
-        // Consider AI intent present if we have ANY category signals or budget
-        // This includes: AI search categories, cart categories, or recent categories
-        return hasValidCategories(profile.getAiSearchCategories())
+        // Consider AI intent present if we have ANY of these signals:
+        // 1. AI search queries (explicit queries like "recommend me headphones under 6000")
+        // 2. Recent search queries (search bar queries like "iphone", "kurta")
+        // 3. Category signals (cart, recent, AI categories)
+        // 4. Budget information
+        return hasValidStrings(profile.getAiSearchQueries())
+                || hasValidStrings(profile.getRecentSearchQueries())
+                || hasValidCategories(profile.getAiSearchCategories())
                 || hasValidCategories(profile.getCartCategories())
                 || hasValidCategories(profile.getRecentCategories())
                 || (profile.getAiMaxBudget() != null && profile.getAiMaxBudget() > 0);
+    }
+
+    private boolean hasValidStrings(List<String> strings) {
+        return strings != null && !strings.isEmpty()
+                && !strings.stream().allMatch(s -> s == null || s.isBlank());
     }
 
     private boolean hasValidCategories(List<String> categories) {
@@ -226,66 +236,18 @@ public class SuggestionsService {
 
     /**
      * Strategy 1: AI Intent Products
-     * Uses category signals and budget to find relevant products.
-     * Searches each category separately for better semantic matching.
+     * Uses search queries and category signals to find relevant products via vector search.
      *
-     * Category priority (based on reliability):
-     * 1. Cart categories (most reliable - from actual products user wants to buy)
-     * 2. Recent categories (reliable - from products user viewed)
-     * 3. AI search categories (less reliable - may have incorrect category inference)
+     * Search priority (based on reliability):
+     * 1. AI search queries (most reliable - user's explicit natural language intent)
+     *    e.g., "Recommend me headphones under 6000", "Compare top-rated laptops"
+     * 2. Recent search queries (reliable - user's search bar queries)
+     *    e.g., "iphone", "kurta", "bluetooth earbuds"
+     * 3. Categories as fallback (cart > recent > AI categories)
      */
     private List<SuggestedProduct> getAIIntentProducts(UserProfile profile, int limit) {
         try {
             Double maxBudget = profile.getAiMaxBudget();
-
-            // Combine categories from all sources with priority ordering
-            // Cart & Recent first (reliable from actual product views), AI last (may have wrong categories)
-            List<String> combinedCategories = new ArrayList<>();
-
-            // Priority 1: Cart categories (strongest - user is ready to buy these)
-            if (profile.getCartCategories() != null) {
-                profile.getCartCategories().stream()
-                        .filter(c -> c != null && !c.isBlank())
-                        .forEach(combinedCategories::add);
-            }
-
-            // Priority 2: Recent categories (strong - user actively browsed these)
-            if (profile.getRecentCategories() != null) {
-                profile.getRecentCategories().stream()
-                        .filter(c -> c != null && !c.isBlank())
-                        .filter(c -> !combinedCategories.contains(c)) // Avoid duplicates
-                        .forEach(combinedCategories::add);
-            }
-
-            // Priority 3: AI search categories (may be inaccurate due to search issues)
-            if (profile.getAiSearchCategories() != null) {
-                profile.getAiSearchCategories().stream()
-                        .filter(c -> c != null && !c.isBlank())
-                        .filter(c -> !combinedCategories.contains(c)) // Avoid duplicates
-                        .forEach(combinedCategories::add);
-            }
-
-            if (combinedCategories.isEmpty()) {
-                log.debug("No valid categories found from any source");
-                return List.of();
-            }
-
-            // Limit to top 4 categories to manage API quota
-            // Most recent/important categories are first
-            List<String> validCategories = combinedCategories.stream()
-                    .distinct()
-                    .limit(4)
-                    .toList();
-
-            log.info("AI intent using combined categories: {} (from ai={}, cart={}, recent={})",
-                    validCategories,
-                    profile.getAiSearchCategories() != null ? profile.getAiSearchCategories().size() : 0,
-                    profile.getCartCategories() != null ? profile.getCartCategories().size() : 0,
-                    profile.getRecentCategories() != null ? profile.getRecentCategories().size() : 0);
-
-            if (validCategories.isEmpty()) {
-                return List.of();
-            }
 
             // Build price filter
             Map<String, Object> filters = new HashMap<>();
@@ -293,63 +255,148 @@ public class SuggestionsService {
                 filters.put("maxPrice", maxBudget);
             }
 
-            // Search each category separately and collect results
             List<SuggestedProduct> allResults = new ArrayList<>();
             Set<UUID> seenProductIds = new HashSet<>();
 
-            // Distribute limit across categories
-            int perCategoryLimit = Math.max(3, (int) Math.ceil((double) limit / validCategories.size()));
-
-            for (int i = 0; i < validCategories.size(); i++) {
-                String category = validCategories.get(i);
-                if (allResults.size() >= limit) {
-                    break;
-                }
-
-                List<SearchResult> results;
-
-                // Use query expansion only for first category (highest intent) to manage quota
-                // Other categories use regular search
-                if (i == 0) {
-                    log.debug("AI intent: searching for category '{}' with limit {} (with query expansion)", category, perCategoryLimit);
-                    results = vectorSearchService.searchWithExpansion(category, perCategoryLimit, filters, 2);
-                } else {
-                    log.debug("AI intent: searching for category '{}' with limit {}", category, perCategoryLimit);
-                    results = vectorSearchService.search(category, perCategoryLimit, filters);
-                }
-
-                // Convert to ProductDTOs and filter duplicates
-                List<UUID> productIds = results.stream()
-                        .map(r -> UUID.fromString(r.getProductId()))
-                        .filter(id -> !seenProductIds.contains(id))
+            // Priority 1: Use AI search queries directly (user's explicit intent)
+            // These are natural language queries like "Recommend me headphones under 6000"
+            if (hasValidStrings(profile.getAiSearchQueries())) {
+                List<String> aiQueries = profile.getAiSearchQueries().stream()
+                        .filter(q -> q != null && !q.isBlank())
+                        .limit(2) // Limit to 2 most recent AI queries
                         .toList();
 
-                if (productIds.isEmpty()) {
-                    continue;
+                log.info("AI intent: using aiSearchQueries for vector search: {}", aiQueries);
+
+                for (String query : aiQueries) {
+                    if (allResults.size() >= limit) break;
+
+                    int queryLimit = Math.max(3, (limit - allResults.size()));
+                    List<SearchResult> results = vectorSearchService.searchWithExpansion(query, queryLimit, filters, 2);
+
+                    addSearchResultsToSuggestions(results, allResults, seenProductIds, limit,
+                            "ai_intent", truncateContext(query, 40));
                 }
+            }
 
-                List<ProductDTO> products = productService.getProductsByIds(productIds);
+            // Priority 2: Use recent search queries (search bar queries)
+            // These are simpler queries like "iphone", "kurta", "headphones"
+            if (allResults.size() < limit && hasValidStrings(profile.getRecentSearchQueries())) {
+                List<String> searchQueries = profile.getRecentSearchQueries().stream()
+                        .filter(q -> q != null && !q.isBlank())
+                        .limit(3) // Limit to 3 most recent search queries
+                        .toList();
 
-                // Add products with category-specific context
-                for (ProductDTO product : products) {
-                    if (allResults.size() >= limit) {
-                        break;
-                    }
-                    if (seenProductIds.add(product.getId())) {
-                        allResults.add(SuggestedProduct.fromStrategy(product, "ai_intent", category));
+                log.info("AI intent: using recentSearchQueries for vector search: {}", searchQueries);
+
+                for (String query : searchQueries) {
+                    if (allResults.size() >= limit) break;
+
+                    int queryLimit = Math.max(2, (limit - allResults.size()));
+                    List<SearchResult> results = vectorSearchService.search(query, queryLimit, filters);
+
+                    addSearchResultsToSuggestions(results, allResults, seenProductIds, limit,
+                            "ai_intent", truncateContext(query, 30));
+                }
+            }
+
+            // Priority 3: Fall back to categories if still need more results
+            if (allResults.size() < limit) {
+                List<String> fallbackCategories = getCombinedCategories(profile);
+
+                if (!fallbackCategories.isEmpty()) {
+                    log.info("AI intent: using fallback categories: {}", fallbackCategories);
+
+                    for (String category : fallbackCategories) {
+                        if (allResults.size() >= limit) break;
+
+                        int categoryLimit = Math.max(2, (limit - allResults.size()));
+                        List<SearchResult> results = vectorSearchService.search(category, categoryLimit, filters);
+
+                        addSearchResultsToSuggestions(results, allResults, seenProductIds, limit,
+                                "ai_intent", category);
                     }
                 }
             }
 
-            log.debug("AI intent: collected {} products from {} categories",
-                    allResults.size(), validCategories.size());
-
+            log.debug("AI intent: collected {} products total", allResults.size());
             return allResults;
 
         } catch (Exception e) {
             log.warn("AI intent strategy failed: {}", e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Helper: Add search results to suggestions list, avoiding duplicates.
+     */
+    private void addSearchResultsToSuggestions(List<SearchResult> results,
+                                                List<SuggestedProduct> allResults,
+                                                Set<UUID> seenProductIds,
+                                                int limit,
+                                                String strategy,
+                                                String context) {
+        List<UUID> productIds = results.stream()
+                .map(r -> UUID.fromString(r.getProductId()))
+                .filter(id -> !seenProductIds.contains(id))
+                .toList();
+
+        if (productIds.isEmpty()) return;
+
+        List<ProductDTO> products = productService.getProductsByIds(productIds);
+
+        for (ProductDTO product : products) {
+            if (allResults.size() >= limit) break;
+            if (seenProductIds.add(product.getId())) {
+                allResults.add(SuggestedProduct.fromStrategy(product, strategy, context));
+            }
+        }
+    }
+
+    /**
+     * Helper: Get combined categories with priority ordering.
+     * Cart > Recent > AI (based on reliability).
+     */
+    private List<String> getCombinedCategories(UserProfile profile) {
+        List<String> combinedCategories = new ArrayList<>();
+
+        // Priority 1: Cart categories (strongest - user is ready to buy these)
+        if (profile.getCartCategories() != null) {
+            profile.getCartCategories().stream()
+                    .filter(c -> c != null && !c.isBlank())
+                    .forEach(combinedCategories::add);
+        }
+
+        // Priority 2: Recent categories (strong - user actively browsed these)
+        if (profile.getRecentCategories() != null) {
+            profile.getRecentCategories().stream()
+                    .filter(c -> c != null && !c.isBlank())
+                    .filter(c -> !combinedCategories.contains(c))
+                    .forEach(combinedCategories::add);
+        }
+
+        // Priority 3: AI search categories (may be inaccurate)
+        if (profile.getAiSearchCategories() != null) {
+            profile.getAiSearchCategories().stream()
+                    .filter(c -> c != null && !c.isBlank())
+                    .filter(c -> !combinedCategories.contains(c))
+                    .forEach(combinedCategories::add);
+        }
+
+        return combinedCategories.stream()
+                .distinct()
+                .limit(4)
+                .toList();
+    }
+
+    /**
+     * Helper: Truncate context string for display.
+     */
+    private String truncateContext(String text, int maxLength) {
+        if (text == null) return null;
+        if (text.length() <= maxLength) return text;
+        return text.substring(0, maxLength - 3) + "...";
     }
 
     /**
