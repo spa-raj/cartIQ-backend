@@ -31,8 +31,10 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     /**
      * Find products by multiple category IDs (for hierarchical category queries).
+     * Explicit countQuery required for proper pagination metadata (totalElements, totalPages).
      */
-    @Query("SELECT p FROM Product p WHERE p.category.id IN :categoryIds AND p.status = 'ACTIVE' ORDER BY p.rating DESC NULLS LAST")
+    @Query(value = "SELECT p FROM Product p WHERE p.category.id IN :categoryIds AND p.status = 'ACTIVE' ORDER BY p.rating DESC NULLS LAST",
+           countQuery = "SELECT COUNT(p) FROM Product p WHERE p.category.id IN :categoryIds AND p.status = 'ACTIVE'")
     Page<Product> findByCategoryIdInAndStatusActive(@Param("categoryIds") List<UUID> categoryIds, Pageable pageable);
 
     Page<Product> findByBrand(String brand, Pageable pageable);
