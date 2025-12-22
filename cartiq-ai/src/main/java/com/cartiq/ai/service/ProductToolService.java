@@ -163,6 +163,9 @@ public class ProductToolService {
     /**
      * Applies a strict filter for all user-provided constraints. This is a safety net
      * to ensure that all returned products match the user's explicit request.
+     *
+     * IMPORTANT: When brand is explicitly specified, category filter is relaxed.
+     * This handles cases where Samsung phones are in "Mobiles" instead of "Smartphones".
      */
     private List<ProductDTO> applyUniversalFilter(
             List<ProductDTO> products,
@@ -181,12 +184,22 @@ public class ProductToolService {
         // If a brand is explicitly passed, use it. Otherwise, try to extract from query.
         final String brandFilter = (brand != null && !brand.isBlank()) ? brand : extractBrandFromQuery(query);
 
+        // When brand is specified, category becomes optional (brand takes priority)
+        // This handles category mismatches like Samsung phones in "Mobiles" vs "Smartphones"
+        final boolean hasBrandFilter = brandFilter != null;
+
         // Start filtering
         List<ProductDTO> filtered = products.stream()
                 .filter(p -> {
-                    // Category check
+                    // Brand check (strict when specified)
+                    boolean brandOk = (brandFilter == null) ||
+                            (p.getBrand() != null && p.getBrand().equalsIgnoreCase(brandFilter));
+
+                    // Category check - RELAXED when brand is specified
+                    // If brand matches, category mismatch is acceptable
                     boolean categoryOk = allowedCategories.isEmpty() ||
-                            (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName()));
+                            (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName())) ||
+                            (hasBrandFilter && brandOk);  // Brand match overrides category
 
                     // Price check
                     boolean maxPriceOk = (maxPrice == null) ||
@@ -197,10 +210,6 @@ public class ProductToolService {
                     // Rating check
                     boolean minRatingOk = (minRating == null) ||
                             (p.getRating() != null && p.getRating().doubleValue() >= minRating);
-
-                    // Brand check
-                    boolean brandOk = (brandFilter == null) ||
-                            (p.getBrand() != null && p.getBrand().equalsIgnoreCase(brandFilter));
 
                     return categoryOk && maxPriceOk && minPriceOk && minRatingOk && brandOk;
                 })
