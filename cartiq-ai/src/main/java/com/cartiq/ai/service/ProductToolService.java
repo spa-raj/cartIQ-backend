@@ -160,12 +160,36 @@ public class ProductToolService {
 
         // 5. Apply a strict, universal post-filter to guarantee all constraints are met.
         // This is the final safety net.
-        List<ProductDTO> finalResults = applyUniversalFilter(
+        List<ProductDTO> filteredResults = applyUniversalFilter(
                 combinedResults, query, category, brand, minPrice, maxPrice, minRating);
 
         // If no results at all, return empty
-        if (finalResults.isEmpty()) {
+        if (filteredResults.isEmpty()) {
             return List.of();
+        }
+
+        // 6. Sort by price descending when maxPrice is specified (show premium products within budget first)
+        // This is better for business - customers see the best products they can afford
+        List<ProductDTO> finalResults;
+        if (maxPrice != null) {
+            finalResults = filteredResults.stream()
+                    .sorted((a, b) -> {
+                        if (a.getPrice() == null && b.getPrice() == null) return 0;
+                        if (a.getPrice() == null) return 1;
+                        if (b.getPrice() == null) return -1;
+                        return b.getPrice().compareTo(a.getPrice()); // Descending
+                    })
+                    .toList();
+            log.debug("Sorted {} products by price descending (budget: {})", finalResults.size(), maxPrice);
+        } else {
+            finalResults = filteredResults;
+        }
+
+        // 7. Return results - skip reranking when maxPrice is specified to preserve price sorting
+        // For budget queries, showing premium products first is better for business
+        if (maxPrice != null) {
+            log.info("Skipping reranker for budget query (maxPrice={}), returning price-sorted results", maxPrice);
+            return finalResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, finalResults.size()));
         }
 
         // If only a few results or reranker not available, return as-is
@@ -173,7 +197,7 @@ public class ProductToolService {
             return finalResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, finalResults.size()));
         }
 
-        // 6. Rerank the clean, filtered list
+        // 8. Rerank the clean, filtered list (only for non-budget queries)
         return rerankResults(query, finalResults);
     }
 
