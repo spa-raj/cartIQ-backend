@@ -396,13 +396,13 @@ public class GeminiService {
                         // searchProducts
                         FunctionDeclaration.builder()
                                 .name("searchProducts")
-                                .description("Search for products with optional filters. Use this when user wants to find products by category, brand, price range, or search query.")
+                                .description("Search for products. The 'query' parameter is REQUIRED and must contain the user's search intent in natural language.")
                                 .parameters(Schema.builder()
                                         .type(Type.Known.OBJECT)
                                         .properties(Map.of(
                                                 "query", Schema.builder()
                                                         .type(Type.Known.STRING)
-                                                        .description("Search text including brand and product type (e.g., 'Samsung phones', 'Apple laptops', 'Sony headphones'). ALWAYS include the brand name in the query when user mentions a specific brand.")
+                                                        .description("REQUIRED. The natural language search query. Must include brand name if user mentions one. Examples: 'Samsung mobile phones', 'Apple laptops under 100000', 'Sony headphones', 'running shoes'. This is the primary search field.")
                                                         .build(),
                                                 "category", Schema.builder()
                                                         .type(Type.Known.STRING)
@@ -410,7 +410,7 @@ public class GeminiService {
                                                         .build(),
                                                 "brand", Schema.builder()
                                                         .type(Type.Known.STRING)
-                                                        .description("Brand name to filter by (e.g., 'Samsung', 'Apple', 'Sony'). ALWAYS use this when user mentions a specific brand.")
+                                                        .description("Brand name to filter by (e.g., 'Samsung', 'Apple', 'Sony'). Use in addition to query, not instead of it.")
                                                         .build(),
                                                 "minPrice", Schema.builder()
                                                         .type(Type.Known.NUMBER)
@@ -425,6 +425,7 @@ public class GeminiService {
                                                         .description("Minimum rating (0-5)")
                                                         .build()
                                         ))
+                                        .required(List.of("query"))
                                         .build())
                                 .build(),
 
