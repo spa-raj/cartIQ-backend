@@ -667,6 +667,156 @@ public class ProductToolService {
         return productService.getProductsByBrand(brand, PageRequest.of(0, DEFAULT_PAGE_SIZE)).getContent();
     }
 
+    /**
+     * Find accessories or complementary products for a specific product.
+     * Called by Gemini for queries like:
+     * - "What accessories go with this?"
+     * - "Suggest accessories for iPhone 15"
+     * - "What goes well with these headphones?"
+     *
+     * Uses a mapping of product categories to accessory categories.
+     *
+     * @param productId Product UUID (optional, from context)
+     * @param productName Product name (optional, for search)
+     * @param category Product category (optional, for direct accessory lookup)
+     * @return List of accessory products
+     */
+    public List<ProductDTO> executeFindAccessories(String productId, String productName, String category) {
+        log.info("Executing findAccessories: productId={}, productName={}, category={}", productId, productName, category);
+
+        // 1. Determine the source product's category
+        String productCategory = category;
+        String sourceProductName = productName;
+
+        if (productCategory == null && productId != null && !productId.isBlank()) {
+            try {
+                ProductDTO product = productService.getProductById(UUID.fromString(productId));
+                if (product != null) {
+                    productCategory = product.getCategoryName();
+                    sourceProductName = product.getName();
+                }
+            } catch (Exception e) {
+                log.warn("Could not fetch product by ID: {}", e.getMessage());
+            }
+        }
+
+        if (productCategory == null && productName != null && !productName.isBlank()) {
+            Page<ProductDTO> results = productService.searchProducts(productName, PageRequest.of(0, 1));
+            if (results.hasContent()) {
+                ProductDTO product = results.getContent().get(0);
+                productCategory = product.getCategoryName();
+                sourceProductName = product.getName();
+            }
+        }
+
+        if (productCategory == null) {
+            log.warn("Could not determine product category for accessories search");
+            return List.of();
+        }
+
+        // 2. Map the product category to accessory categories
+        List<String> accessoryCategories = getAccessoryCategories(productCategory);
+
+        if (accessoryCategories.isEmpty()) {
+            log.info("No accessory mapping found for category: {}", productCategory);
+            // Fallback: use vector search for semantically related products
+            return findRelatedProducts(sourceProductName, productCategory);
+        }
+
+        log.info("Finding accessories for category '{}': {}", productCategory, accessoryCategories);
+
+        // 3. Search for products in accessory categories
+        List<ProductDTO> accessories = new ArrayList<>();
+
+        for (String accessoryCategory : accessoryCategories) {
+            UUID categoryId = findCategoryIdByName(accessoryCategory);
+            if (categoryId != null) {
+                Page<ProductDTO> categoryProducts = productService.getProductsByCategoryWithFilters(
+                        categoryId, null, null, null, PageRequest.of(0, 5));
+                accessories.addAll(categoryProducts.getContent());
+            }
+        }
+
+        // Limit to 10 products
+        return accessories.stream()
+                .limit(DEFAULT_PAGE_SIZE)
+                .toList();
+    }
+
+    /**
+     * Maps product categories to their typical accessory categories.
+     * Based on common e-commerce accessory relationships.
+     */
+    private List<String> getAccessoryCategories(String productCategory) {
+        if (productCategory == null) {
+            return List.of();
+        }
+
+        String lower = productCategory.toLowerCase();
+
+        // Smartphones → Cases, Screen Protectors, Chargers, Earbuds
+        if (lower.contains("smartphone") || lower.contains("mobile") || lower.contains("phone")) {
+            return List.of("Mobile Cases & Covers", "Screen Protectors", "Chargers & Cables",
+                    "Power Banks", "Headphones", "Earbuds");
+        }
+
+        // Laptops → Bags, Mouse, Keyboard, USB Hubs
+        if (lower.contains("laptop") || lower.contains("notebook")) {
+            return List.of("Laptop Bags", "Mouse", "Keyboards", "USB Hubs",
+                    "Laptop Stands", "External Hard Drives");
+        }
+
+        // Headphones → Cases, Cables, Ear Cushions
+        if (lower.contains("headphone") || lower.contains("earphone") || lower.contains("earbud")) {
+            return List.of("Headphone Cases", "Audio Cables", "Ear Cushions");
+        }
+
+        // Cameras → Lenses, Bags, Tripods, Memory Cards
+        if (lower.contains("camera") || lower.contains("dslr")) {
+            return List.of("Camera Lenses", "Camera Bags", "Tripods", "Memory Cards");
+        }
+
+        // TVs → Soundbars, Wall Mounts, HDMI Cables
+        if (lower.contains("television") || lower.contains("tv")) {
+            return List.of("Soundbars", "TV Wall Mounts", "HDMI Cables", "Streaming Devices");
+        }
+
+        // Gaming → Controllers, Headsets, Gaming Chairs
+        if (lower.contains("gaming") || lower.contains("console")) {
+            return List.of("Gaming Controllers", "Gaming Headsets", "Gaming Chairs");
+        }
+
+        // Watches → Watch Bands, Chargers
+        if (lower.contains("watch") || lower.contains("smartwatch")) {
+            return List.of("Watch Bands", "Watch Chargers", "Watch Cases");
+        }
+
+        // Shoes → Socks, Shoe Care, Insoles
+        if (lower.contains("shoe") || lower.contains("sneaker") || lower.contains("footwear")) {
+            return List.of("Socks", "Shoe Care", "Insoles", "Shoe Bags");
+        }
+
+        return List.of();
+    }
+
+    /**
+     * Find related products using vector search when no accessory mapping exists.
+     */
+    private List<ProductDTO> findRelatedProducts(String productName, String excludeCategory) {
+        if (productName == null || productName.isBlank()) {
+            return List.of();
+        }
+
+        String query = "accessories for " + productName;
+        List<ProductDTO> results = executeVectorSearch(query, null, null, null, null);
+
+        // Filter out products from the same category (we want accessories, not similar products)
+        return results.stream()
+                .filter(p -> !p.getCategoryName().equalsIgnoreCase(excludeCategory))
+                .limit(DEFAULT_PAGE_SIZE)
+                .toList();
+    }
+
     // ==================== Helper Methods ====================
 
     private UUID findCategoryIdByName(String categoryName) {

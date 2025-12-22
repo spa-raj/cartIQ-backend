@@ -2,6 +2,7 @@ package com.cartiq.ai.service;
 
 import com.cartiq.kafka.dto.KafkaEvents.AISearchEvent;
 import com.cartiq.kafka.producer.EventProducer;
+import com.cartiq.kafka.service.ChatContextService;
 import com.cartiq.product.dto.CategoryDTO;
 import com.cartiq.product.dto.ProductDTO;
 import com.cartiq.product.service.CategoryService;
@@ -26,6 +27,7 @@ public class GeminiService {
 
     private final ProductToolService productToolService;
     private final CategoryService categoryService;
+    private final ChatContextService chatContextService;
     private final EventProducer eventProducer;
     private final ObjectMapper objectMapper;
     private final Client client;
@@ -36,6 +38,7 @@ public class GeminiService {
     public GeminiService(
             ProductToolService productToolService,
             CategoryService categoryService,
+            ChatContextService chatContextService,
             EventProducer eventProducer,
             ObjectMapper objectMapper,
             @Value("${vertex.ai.project-id:}") String projectId,
@@ -43,6 +46,7 @@ public class GeminiService {
             @Value("${vertex.ai.model:gemini-2.0-flash}") String modelName) {
         this.productToolService = productToolService;
         this.categoryService = categoryService;
+        this.chatContextService = chatContextService;
         this.eventProducer = eventProducer;
         this.objectMapper = objectMapper;
         this.modelName = modelName;
@@ -311,6 +315,19 @@ public class GeminiService {
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
 
+                    // Save search context for follow-up queries like "show me cheaper ones"
+                    if (!products.isEmpty()) {
+                        chatContextService.updateLastSearchContext(
+                                userId,
+                                query,
+                                category,
+                                brand,
+                                minPrice != null ? java.math.BigDecimal.valueOf(minPrice) : null,
+                                maxPrice != null ? java.math.BigDecimal.valueOf(maxPrice) : null,
+                                minRating != null ? java.math.BigDecimal.valueOf(minRating) : null
+                        );
+                    }
+
                     // Emit Kafka event - searchProducts uses HYBRID (Vector + FTS + Reranker)
                     emitAISearchEvent(userId, sessionId, originalQuery, functionName, "HYBRID",
                             category, minPrice, maxPrice, minRating, products, startTime);
@@ -372,6 +389,20 @@ public class GeminiService {
                     // FTS - database query by brand
                     emitAISearchEvent(userId, sessionId, originalQuery, functionName, "FTS",
                             null, null, null, null, products, startTime);
+                }
+
+                case "findAccessories" -> {
+                    String productId = (String) args.get("productId");
+                    String productName = (String) args.get("productName");
+                    String category = (String) args.get("category");
+
+                    products = productToolService.executeFindAccessories(productId, productName, category);
+                    responseData.put("products", productsToMap(products));
+                    responseData.put("count", products.size());
+
+                    // Vector search for accessories
+                    emitAISearchEvent(userId, sessionId, originalQuery, functionName, "VECTOR",
+                            category, null, null, null, products, startTime);
                 }
 
                 default -> {
@@ -499,6 +530,29 @@ public class GeminiService {
                                         ))
                                         .required(List.of("brand"))
                                         .build())
+                                .build(),
+
+                        // findAccessories - for contextual follow-ups
+                        FunctionDeclaration.builder()
+                                .name("findAccessories")
+                                .description("Find accessories or complementary products for a specific product. Use when user asks 'what accessories go with this?', 'what goes well with this?', or 'suggest accessories for [product]'.")
+                                .parameters(Schema.builder()
+                                        .type(Type.Known.OBJECT)
+                                        .properties(Map.of(
+                                                "productId", Schema.builder()
+                                                        .type(Type.Known.STRING)
+                                                        .description("Product UUID to find accessories for. Use from context if user says 'this' or 'it'.")
+                                                        .build(),
+                                                "productName", Schema.builder()
+                                                        .type(Type.Known.STRING)
+                                                        .description("Product name to find accessories for")
+                                                        .build(),
+                                                "category", Schema.builder()
+                                                        .type(Type.Known.STRING)
+                                                        .description("Product category to help find relevant accessories")
+                                                        .build()
+                                        ))
+                                        .build())
                                 .build()
                 ))
                 .build();
@@ -526,7 +580,7 @@ public class GeminiService {
         prompt.append("""
 
                 IMPORTANT RULES FOR SEARCH:
-                1. ALWAYS include the category parameter when calling searchProducts.
+                1. When user mentions a SPECIFIC product type, include the category parameter.
                 2. Choose the MOST RELEVANT category from the list above based on the user's query.
                 3. For "mobile phones", "phones", "cell phones" → use category="Smartphones"
                 4. For "TVs", "television" → use category="Televisions" or "Smart Televisions"
@@ -537,6 +591,12 @@ public class GeminiService {
                 7. Do NOT put the brand name in the query parameter - use the brand parameter instead.
                 8. The brand parameter filters results to ONLY show products from that brand.
 
+                PRICE-ONLY QUERIES (IMPORTANT):
+                9. When user asks for products by PRICE ONLY (without category), DO NOT ask for clarification.
+                10. For vague queries like "under 1000", "gifts under 500", "premium products", search immediately.
+                11. Use query="products" or query="gifts" and let the search return diverse results.
+                12. For "gifts", search with query="gifts" to find gift-worthy items across categories.
+
                 EXAMPLES:
                 **User:** "Show me Samsung mobile phones" → `searchProducts(query="mobile phones", category="Smartphones", brand="Samsung")`
                 **User:** "Samsung phones under 50000" → `searchProducts(category="Smartphones", brand="Samsung", maxPrice=50000)`
@@ -544,6 +604,21 @@ public class GeminiService {
                 **User:** "Apple laptops" → `searchProducts(category="Laptops", brand="Apple")`
                 **User:** "Recommend laptops for coding" → `searchProducts(query="laptops for coding", category="Laptops")`
                 **User:** "Compare iPhone 15 and Samsung S24" → `compareProducts(productNames=["iPhone 15", "Samsung S24"])`
+                **User:** "What can I buy under 1000?" → `searchProducts(query="products", maxPrice=1000)`
+                **User:** "Gifts under 500" → `searchProducts(query="gifts", maxPrice=500)`
+                **User:** "Premium products above 50000" → `searchProducts(query="premium products", minPrice=50000)`
+                **User:** "Budget items under 2000" → `searchProducts(query="budget products", maxPrice=2000)`
+
+                CONTEXTUAL FOLLOW-UPS (IMPORTANT):
+                When user says "this", "it", or refers to a previously viewed product:
+                - Use the LAST_VIEWED_PRODUCT context below
+                - For "accessories for this" → use `findAccessories(productId=<from context>, category=<from context>)`
+                - For "show me cheaper ones" → use previous search with lower maxPrice
+                - For "anything above 50000?" → use previous search with minPrice=50000
+
+                EXAMPLES:
+                **User:** "What accessories go with this?" → `findAccessories(productId="<from LAST_VIEWED_PRODUCT>", category="<category>")`
+                **User:** "Show me cheaper ones" → `searchProducts(query="<from LAST_SEARCH>", maxPrice=<lower than last>)`
                 """);
 
         prompt.append("\n\n");
@@ -558,6 +633,35 @@ public class GeminiService {
             }
             if (userContext.containsKey("recentlyViewed")) {
                 prompt.append("- Recently viewed products\n");
+            }
+
+            // Chat memory context
+            if (userContext.containsKey("lastViewedProductId")) {
+                prompt.append("\nLAST_VIEWED_PRODUCT:\n");
+                prompt.append("- Product ID: ").append(userContext.get("lastViewedProductId")).append("\n");
+                if (userContext.containsKey("lastViewedProductName")) {
+                    prompt.append("- Product Name: ").append(userContext.get("lastViewedProductName")).append("\n");
+                }
+                if (userContext.containsKey("lastViewedProductCategory")) {
+                    prompt.append("- Category: ").append(userContext.get("lastViewedProductCategory")).append("\n");
+                }
+            }
+
+            if (userContext.containsKey("lastSearchQuery")) {
+                prompt.append("\nLAST_SEARCH:\n");
+                prompt.append("- Query: ").append(userContext.get("lastSearchQuery")).append("\n");
+                if (userContext.containsKey("lastSearchCategory")) {
+                    prompt.append("- Category: ").append(userContext.get("lastSearchCategory")).append("\n");
+                }
+                if (userContext.containsKey("lastSearchBrand")) {
+                    prompt.append("- Brand: ").append(userContext.get("lastSearchBrand")).append("\n");
+                }
+                if (userContext.containsKey("lastSearchMaxPrice")) {
+                    prompt.append("- Max Price: ₹").append(userContext.get("lastSearchMaxPrice")).append("\n");
+                }
+                if (userContext.containsKey("lastSearchMinPrice")) {
+                    prompt.append("- Min Price: ₹").append(userContext.get("lastSearchMinPrice")).append("\n");
+                }
             }
         }
 

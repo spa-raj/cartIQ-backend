@@ -3,6 +3,7 @@ package com.cartiq.kafka.controller;
 import com.cartiq.common.enums.*;
 import com.cartiq.kafka.dto.KafkaEvents.*;
 import com.cartiq.kafka.producer.EventProducer;
+import com.cartiq.kafka.service.ChatContextService;
 import jakarta.validation.Valid;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,7 @@ import java.util.stream.Collectors;
 public class EventTrackingController {
 
     private final EventProducer eventProducer;
+    private final ChatContextService chatContextService;
 
     // Flink SQL TO_TIMESTAMP() expects this format: yyyy-MM-dd HH:mm:ss.SSS
     private static final DateTimeFormatter FLINK_TIMESTAMP_FORMAT =
@@ -100,6 +102,16 @@ public class EventTrackingController {
 
         eventProducer.publishProductView(event);
         log.debug("Tracked product view: user={}, product={}", request.getUserId(), request.getProductId());
+
+        // Update chat context for "accessories for this" follow-up queries
+        if (request.getUserId() != null && !request.getUserId().isBlank()) {
+            chatContextService.updateLastViewedProduct(
+                    request.getUserId(),
+                    request.getProductId(),
+                    request.getProductName(),
+                    request.getCategory()
+            );
+        }
 
         return ResponseEntity.ok(Map.of("status", "tracked", "eventId", event.getEventId()));
     }

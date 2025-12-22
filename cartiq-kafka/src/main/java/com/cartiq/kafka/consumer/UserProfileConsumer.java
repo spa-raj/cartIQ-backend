@@ -1,5 +1,6 @@
 package com.cartiq.kafka.consumer;
 
+import com.cartiq.kafka.dto.LastSearchContext;
 import com.cartiq.kafka.dto.UserProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -154,6 +155,11 @@ public class UserProfileConsumer {
                 .aiMaxBudget(toDouble(map.get("aiMaxBudget")))
                 .aiProductSearches(toLong(map.get("aiProductSearches")))
                 .aiProductComparisons(toLong(map.get("aiProductComparisons")))
+                // Chat memory fields (preserved, not from Flink)
+                .lastViewedProductId((String) map.get("lastViewedProductId"))
+                .lastViewedProductName((String) map.get("lastViewedProductName"))
+                .lastViewedProductCategory((String) map.get("lastViewedProductCategory"))
+                .lastSearchContext(convertLastSearchContext(map.get("lastSearchContext")))
                 // Order history
                 .totalOrders(toLong(map.get("totalOrders")))
                 .totalSpent(toDouble(map.get("totalSpent")))
@@ -221,6 +227,13 @@ public class UserProfileConsumer {
                 .aiMaxBudget(Math.max(safeDouble(existing.getAiMaxBudget()), safeDouble(incoming.getAiMaxBudget())))
                 .aiProductSearches(useIncomingOrExisting(incoming.getAiProductSearches(), existing.getAiProductSearches()))
                 .aiProductComparisons(useIncomingOrExisting(incoming.getAiProductComparisons(), existing.getAiProductComparisons()))
+
+                // Chat memory fields - ALWAYS preserve from existing (not from Flink)
+                // These are updated directly by ChatContextService, not via Kafka
+                .lastViewedProductId(existing.getLastViewedProductId())
+                .lastViewedProductName(existing.getLastViewedProductName())
+                .lastViewedProductCategory(existing.getLastViewedProductCategory())
+                .lastSearchContext(existing.getLastSearchContext())
 
                 // Order history - use incoming (lifetime totals from Flink)
                 .totalOrders(useIncomingOrExisting(incoming.getTotalOrders(), existing.getTotalOrders()))
@@ -298,6 +311,35 @@ public class UserProfileConsumer {
         if (value instanceof Double d) return d;
         if (value instanceof Number n) return n.doubleValue();
         return 0.0;
+    }
+
+    /**
+     * Convert LinkedHashMap to LastSearchContext.
+     */
+    @SuppressWarnings("unchecked")
+    private LastSearchContext convertLastSearchContext(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof LastSearchContext ctx) return ctx;
+        if (obj instanceof LinkedHashMap) {
+            LinkedHashMap<String, Object> map = (LinkedHashMap<String, Object>) obj;
+            return LastSearchContext.builder()
+                    .query((String) map.get("query"))
+                    .category((String) map.get("category"))
+                    .brand((String) map.get("brand"))
+                    .minPrice(toBigDecimal(map.get("minPrice")))
+                    .maxPrice(toBigDecimal(map.get("maxPrice")))
+                    .minRating(toBigDecimal(map.get("minRating")))
+                    .timestamp(toLong(map.get("timestamp")))
+                    .build();
+        }
+        return null;
+    }
+
+    private java.math.BigDecimal toBigDecimal(Object value) {
+        if (value == null) return null;
+        if (value instanceof java.math.BigDecimal bd) return bd;
+        if (value instanceof Number n) return java.math.BigDecimal.valueOf(n.doubleValue());
+        return null;
     }
 
     /**
