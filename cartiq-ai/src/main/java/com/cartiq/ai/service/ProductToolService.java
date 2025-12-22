@@ -98,30 +98,26 @@ public class ProductToolService {
         List<ProductDTO> categoryResults = List.of();
         List<ProductDTO> brandResults = List.of();
 
-        // Build effective query: combine brand + query for better search results
-        // E.g., query="mobile phones" + brand="Samsung" → "Samsung mobile phones"
-        String effectiveQuery = query;
-        if (brand != null && !brand.isBlank()) {
-            if (effectiveQuery != null && !effectiveQuery.isBlank()) {
-                // Prepend brand if not already in query
-                if (!effectiveQuery.toLowerCase().contains(brand.toLowerCase())) {
-                    effectiveQuery = brand + " " + effectiveQuery;
-                }
-            } else {
-                effectiveQuery = brand;
-            }
-        }
-        log.info("Effective query for search: '{}' (original query='{}', brand='{}')", effectiveQuery, query, brand);
+        // Build separate queries for different search strategies:
+        // - Vector search: full natural language query (semantic understanding)
+        // - FTS search: brand name for exact keyword matching (avoids "mobile phones" breaking FTS)
+        String vectorQuery = (query != null && !query.isBlank()) ? query : brand;
+        String ftsQuery = (brand != null && !brand.isBlank()) ? brand : query;
 
-        // 1. Vector Search (semantic) - NO category filter, let embeddings find relevant products
-        if (vectorSearchService.isAvailable() && effectiveQuery != null) {
-            vectorResults = executeVectorSearch(effectiveQuery, null, minPrice, maxPrice, minRating);
+        log.info("Search queries: vectorQuery='{}', ftsQuery='{}' (original query='{}', brand='{}')",
+                vectorQuery, ftsQuery, query, brand);
+
+        // 1. Vector Search (semantic) - understands natural language like "mobile phones"
+        if (vectorSearchService.isAvailable() && vectorQuery != null) {
+            vectorResults = executeVectorSearch(vectorQuery, null, minPrice, maxPrice, minRating);
             log.debug("Vector search returned {} candidates", vectorResults.size());
         }
 
-        // 2. FTS Search (keyword) - uses effectiveQuery (brand as fallback)
-        ftsResults = executeFtsSearchWithLimit(effectiveQuery, null, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
-        log.debug("FTS search returned {} candidates", ftsResults.size());
+        // 2. FTS Search (keyword) - uses brand for exact matching (robust)
+        if (ftsQuery != null) {
+            ftsResults = executeFtsSearchWithLimit(ftsQuery, null, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
+            log.debug("FTS search returned {} candidates", ftsResults.size());
+        }
 
         // 3. Category-specific search (fallback to ensure we have products from target category)
         if (category != null && !category.isBlank()) {
@@ -138,10 +134,15 @@ public class ProductToolService {
             }
         }
 
-        // 4. Brand-specific search (CRITICAL: ensures brand products are found even if in different category)
+        // 4. Brand-specific search WITH price filters (ensures budget products are found)
         if (brand != null && !brand.isBlank()) {
-            brandResults = productService.getProductsByBrand(brand, PageRequest.of(0, HYBRID_CANDIDATES))
-                    .getContent();
+            brandResults = productService.getProductsByBrandWithFilters(
+                    brand,
+                    minPrice != null ? BigDecimal.valueOf(minPrice) : null,
+                    maxPrice != null ? BigDecimal.valueOf(maxPrice) : null,
+                    minRating != null ? BigDecimal.valueOf(minRating) : null,
+                    PageRequest.of(0, HYBRID_CANDIDATES)
+            ).getContent();
             log.debug("Brand search for '{}' returned {} candidates", brand, brandResults.size());
         }
 

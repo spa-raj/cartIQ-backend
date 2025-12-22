@@ -39,6 +39,22 @@ public interface ProductRepository extends JpaRepository<Product, UUID> {
 
     Page<Product> findByBrand(String brand, Pageable pageable);
 
+    /**
+     * Search by brand with price and rating filters.
+     * Orders by price ASC to prioritize budget products.
+     */
+    @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
+           "AND LOWER(p.brand) = LOWER(:brand) " +
+           "AND (:minPrice IS NULL OR p.price >= :minPrice) " +
+           "AND (:maxPrice IS NULL OR p.price <= :maxPrice) " +
+           "AND (:minRating IS NULL OR p.rating >= :minRating) " +
+           "ORDER BY p.price ASC")
+    Page<Product> findByBrandWithFilters(@Param("brand") String brand,
+                                         @Param("minPrice") BigDecimal minPrice,
+                                         @Param("maxPrice") BigDecimal maxPrice,
+                                         @Param("minRating") BigDecimal minRating,
+                                         Pageable pageable);
+
     @Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' AND p.featured = true")
     Page<Product> findFeaturedProducts(Pageable pageable);
 

@@ -85,6 +85,27 @@ public class ProductService {
     }
 
     /**
+     * Search by brand with price and rating filters.
+     * Orders by price ASC to prioritize budget-friendly products.
+     *
+     * @param brand Brand name (case-insensitive)
+     * @param minPrice Minimum price filter (nullable)
+     * @param maxPrice Maximum price filter (nullable)
+     * @param minRating Minimum rating filter (nullable)
+     * @param pageable Pagination parameters
+     * @return Page of matching products ordered by price ascending
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductDTO> getProductsByBrandWithFilters(String brand, BigDecimal minPrice,
+                                                           BigDecimal maxPrice, BigDecimal minRating,
+                                                           Pageable pageable) {
+        log.debug("Brand search with filters: brand={}, minPrice={}, maxPrice={}, minRating={}",
+                brand, minPrice, maxPrice, minRating);
+        return productRepository.findByBrandWithFilters(brand, minPrice, maxPrice, minRating, pageable)
+                .map(ProductDTO::fromEntity);
+    }
+
+    /**
      * Search products using PostgreSQL Full-Text Search.
      * Falls back to LIKE-based search if FTS returns no results.
      *
