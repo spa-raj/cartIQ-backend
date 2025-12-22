@@ -185,11 +185,15 @@ public class ProductToolService {
             finalResults = filteredResults;
         }
 
-        // 7. Return results - skip reranking when maxPrice is specified to preserve price sorting
-        // For budget queries, showing premium products first is better for business
-        if (maxPrice != null) {
-            log.info("Skipping reranker for budget query (maxPrice={}), returning price-sorted results", maxPrice);
-            return finalResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, finalResults.size()));
+        // 7. For budget queries, take top premium candidates then rerank for relevance
+        // This gives "most relevant products among premium options within budget"
+        if (maxPrice != null && finalResults.size() > DEFAULT_PAGE_SIZE && rerankerService.isAvailable()) {
+            // Take top 2x candidates from premium price range, then rerank for relevance
+            int premiumCandidates = Math.min(finalResults.size(), DEFAULT_PAGE_SIZE * 2);
+            List<ProductDTO> premiumProducts = finalResults.subList(0, premiumCandidates);
+            log.info("Budget query: reranking top {} premium products (out of {}) for relevance",
+                    premiumCandidates, finalResults.size());
+            return rerankResults(query, premiumProducts);
         }
 
         // If only a few results or reranker not available, return as-is
@@ -197,7 +201,7 @@ public class ProductToolService {
             return finalResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, finalResults.size()));
         }
 
-        // 8. Rerank the clean, filtered list (only for non-budget queries)
+        // 8. Rerank the clean, filtered list (for non-budget queries)
         return rerankResults(query, finalResults);
     }
 
