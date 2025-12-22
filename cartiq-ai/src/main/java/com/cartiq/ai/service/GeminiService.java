@@ -503,6 +503,24 @@ public class GeminiService {
         prompt.append("Use the available tools to search for real products from our catalog. ");
         prompt.append("Always be helpful, concise, and recommend products based on user needs. ");
         prompt.append("Prices are in Indian Rupees (₹). ");
+
+        prompt.append("""
+
+                Here are some examples of how to use the tools:
+
+                **User:** "Show me some wireless headphones"
+                **Tool Call:** `searchProducts(query="wireless headphones")`
+
+                **User:** "Find laptops under ₹50000"
+                **Tool Call:** `searchProducts(query="laptops", maxPrice=50000)`
+
+                **User:** "Recommend me some good running shoes from Nike"
+                **Tool Call:** `getProductsByBrand(brand="Nike")`
+
+                **User:** "Compare the Samsung Galaxy S23 and iPhone 15"
+                **Tool Call:** `compareProducts(productNames=["Samsung Galaxy S23", "iPhone 15"])`
+                """);
+
         prompt.append("\n\n");
 
         if (userContext != null && !userContext.isEmpty()) {

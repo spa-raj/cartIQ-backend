@@ -259,10 +259,27 @@ public class VectorSearchService {
                     datapoint.set("numeric_restricts", numericRestricts);
                 }
 
-                // NOTE: Categorical restricts (category_id, brand) are disabled for now
-                // because the index may not have matching metadata. FTS and Reranker
-                // handle category filtering instead. Vector Search focuses on semantic matching.
-                // TODO: Re-enable after verifying index metadata includes category_id and brand
+                // Enable categorical restricts
+                ArrayNode allowRestricts = objectMapper.createArrayNode();
+                if (filters.containsKey("categoryId")) {
+                    ObjectNode allow = objectMapper.createObjectNode();
+                    allow.put("namespace", "category_id");
+                    ArrayNode allowTokens = objectMapper.createArrayNode();
+                    allowTokens.add((String) filters.get("categoryId"));
+                    allow.set("allow", allowTokens);
+                    allowRestricts.add(allow);
+                }
+                if (filters.containsKey("brand")) {
+                    ObjectNode allow = objectMapper.createObjectNode();
+                    allow.put("namespace", "brand");
+                    ArrayNode allowTokens = objectMapper.createArrayNode();
+                    allowTokens.add((String) filters.get("brand"));
+                    allow.set("allow", allowTokens);
+                    allowRestricts.add(allow);
+                }
+                if (!allowRestricts.isEmpty()) {
+                    datapoint.set("restricts", allowRestricts);
+                }
             }
 
             query.set("datapoint", datapoint);
