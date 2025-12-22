@@ -122,13 +122,9 @@ public class ProductToolService {
 
         // 4. Apply category filter if specified (post-filter since FTS doesn't support category+query)
         if (category != null && !category.isBlank()) {
-            UUID categoryId = findCategoryIdByName(category);
-            Set<String> allowedCategories = new HashSet<>();
-
-            if (categoryId != null) {
-                // Get category and all descendants
-                allowedCategories = categoryService.expandCategoryNamesWithDescendants(List.of(category));
-            }
+            // Use fuzzy matching to expand category names and include descendants
+            // AI provides the category name from the available list, fuzzy matching handles variations
+            Set<String> allowedCategories = categoryService.expandCategoryNamesWithDescendants(List.of(category));
 
             if (!allowedCategories.isEmpty()) {
                 Set<String> finalAllowedCategories = allowedCategories;
@@ -138,9 +134,13 @@ public class ProductToolService {
                         .toList();
 
                 log.info("Category filter '{}': {} -> {} products (allowed categories: {})",
-                        category, combinedResults.size(), filtered.size(), allowedCategories.size());
+                        category, combinedResults.size(), filtered.size(), allowedCategories);
 
                 combinedResults = new ArrayList<>(filtered);
+            } else {
+                // Category specified but no matching categories found - don't return random products
+                log.warn("Category '{}' not found in database, returning empty results", category);
+                return List.of();
             }
         }
 

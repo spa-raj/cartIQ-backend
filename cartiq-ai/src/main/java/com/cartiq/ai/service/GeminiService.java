@@ -4,6 +4,7 @@ import com.cartiq.kafka.dto.KafkaEvents.AISearchEvent;
 import com.cartiq.kafka.producer.EventProducer;
 import com.cartiq.product.dto.CategoryDTO;
 import com.cartiq.product.dto.ProductDTO;
+import com.cartiq.product.service.CategoryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.Client;
 import com.google.genai.types.*;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Service for interacting with Google Gemini via Vertex AI.
@@ -23,6 +25,7 @@ import java.util.*;
 public class GeminiService {
 
     private final ProductToolService productToolService;
+    private final CategoryService categoryService;
     private final EventProducer eventProducer;
     private final ObjectMapper objectMapper;
     private final Client client;
@@ -32,12 +35,14 @@ public class GeminiService {
 
     public GeminiService(
             ProductToolService productToolService,
+            CategoryService categoryService,
             EventProducer eventProducer,
             ObjectMapper objectMapper,
             @Value("${vertex.ai.project-id:}") String projectId,
             @Value("${vertex.ai.location:us-central1}") String location,
             @Value("${vertex.ai.model:gemini-2.0-flash}") String modelName) {
         this.productToolService = productToolService;
+        this.categoryService = categoryService;
         this.eventProducer = eventProducer;
         this.objectMapper = objectMapper;
         this.modelName = modelName;
@@ -504,31 +509,30 @@ public class GeminiService {
         prompt.append("Always be helpful, concise, and recommend products based on user needs. ");
         prompt.append("Prices are in Indian Rupees (₹). ");
 
+        // Fetch available categories for AI to choose from
+        String categoryList = getCategoryListForPrompt();
+
         prompt.append("""
 
-                Here are some examples of how to use the tools:
+                AVAILABLE PRODUCT CATEGORIES:
+                """);
+        prompt.append(categoryList);
+        prompt.append("""
 
-                **User:** "Show me some wireless headphones"
-                **Tool Call:** `searchProducts(query="wireless headphones")`
+                IMPORTANT RULES FOR CATEGORY SELECTION:
+                1. ALWAYS include the category parameter when calling searchProducts.
+                2. Choose the MOST RELEVANT category from the list above based on the user's query.
+                3. For "mobile phones", "phones", "cell phones" → use "Smartphones"
+                4. For "TVs", "television" → use "Televisions" or "Smart Televisions"
+                5. For "headphones", "earphones", "earbuds" → use "Headphones" or related category
+                6. When user mentions a brand AND a product type, use searchProducts with both query and category.
+                7. Only use getProductsByBrand when user asks for ALL products from a brand without specifying a type.
 
-                **User:** "Find laptops under ₹50000"
-                **Tool Call:** `searchProducts(query="laptops", maxPrice=50000)`
-
-                **User:** "Recommend me Samsung smartphones under ₹50000"
-                **Tool Call:** `searchProducts(query="Samsung smartphones", category="Smartphones", maxPrice=50000)`
-
-                **User:** "Show me Nike running shoes"
-                **Tool Call:** `searchProducts(query="Nike running shoes", category="Running Shoes")`
-
-                **User:** "Find Sony headphones under ₹10000"
-                **Tool Call:** `searchProducts(query="Sony headphones", category="On-Ear", maxPrice=10000)`
-
-                **User:** "Compare the Samsung Galaxy S23 and iPhone 15"
-                **Tool Call:** `compareProducts(productNames=["Samsung Galaxy S23", "iPhone 15"])`
-
-                IMPORTANT: When user mentions a brand AND a product type (like "Samsung smartphones" or "Nike shoes"),
-                always use searchProducts with both query and category parameters, NOT getProductsByBrand.
-                Only use getProductsByBrand when user asks for ALL products from a brand without specifying a type.
+                EXAMPLES:
+                **User:** "Show me Samsung mobile phones" → `searchProducts(query="Samsung mobile phones", category="Smartphones")`
+                **User:** "Find Sony TVs under ₹50000" → `searchProducts(query="Sony TVs", category="Televisions", maxPrice=50000)`
+                **User:** "Recommend laptops for coding" → `searchProducts(query="laptops for coding", category="Laptops")`
+                **User:** "Compare iPhone 15 and Samsung S24" → `compareProducts(productNames=["iPhone 15", "Samsung S24"])`
                 """);
 
         prompt.append("\n\n");
@@ -548,6 +552,35 @@ public class GeminiService {
 
         prompt.append("\nWhen showing products, mention key details like name, price, rating, and why it's relevant.");
         return prompt.toString();
+    }
+
+    /**
+     * Get formatted list of available categories for the AI prompt.
+     * Returns category names as a comma-separated list.
+     */
+    private String getCategoryListForPrompt() {
+        try {
+            List<CategoryDTO> categories = categoryService.getAllCategories();
+            if (categories == null || categories.isEmpty()) {
+                return "Smartphones, Laptops, Headphones, Televisions, Clothing, Home & Kitchen";
+            }
+
+            // Get unique category names, sorted alphabetically
+            String categoryNames = categories.stream()
+                    .map(CategoryDTO::getName)
+                    .filter(name -> name != null && !name.isBlank())
+                    .distinct()
+                    .sorted()
+                    .collect(Collectors.joining(", "));
+
+            log.debug("Loaded {} categories for AI prompt", categories.size());
+            return categoryNames;
+
+        } catch (Exception e) {
+            log.warn("Failed to fetch categories for AI prompt: {}", e.getMessage());
+            // Fallback to common categories
+            return "Smartphones, Laptops, Headphones, Televisions, Clothing, Home & Kitchen";
+        }
     }
 
     /**
