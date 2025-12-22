@@ -11,10 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -177,5 +174,33 @@ public class CategoryService {
         category.setActive(false);
         categoryRepository.save(category);
         log.info("Category soft deleted: id={}", id);
+    }
+
+    /**
+     * Expand category names to include all descendant category names.
+     * E.g., ["Clothing"] -> ["Clothing", "Salwar Suits", "Kurtas", "T-Shirts", ...]
+     * This enables filtering by parent category to also match products in child categories.
+     */
+    @Transactional(readOnly = true)
+    public Set<String> expandCategoryNamesWithDescendants(Collection<String> categoryNames) {
+        if (categoryNames == null || categoryNames.isEmpty()) {
+            return new HashSet<>();
+        }
+
+        Set<String> expanded = new HashSet<>(categoryNames);
+
+        for (String categoryName : categoryNames) {
+            categoryRepository.findByName(categoryName).ifPresent(category -> {
+                if (category.getPath() != null) {
+                    // Find all descendants using path prefix
+                    List<Category> descendants = categoryRepository
+                            .findByPathStartingWithAndActiveTrue(category.getPath() + " >> ");
+                    descendants.forEach(desc -> expanded.add(desc.getName()));
+                }
+            });
+        }
+
+        log.debug("Expanded {} categories to {} (with descendants)", categoryNames.size(), expanded.size());
+        return expanded;
     }
 }

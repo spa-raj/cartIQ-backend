@@ -4,6 +4,7 @@ import com.cartiq.ai.dto.SuggestedProduct;
 import com.cartiq.ai.dto.SuggestionsResponse;
 import com.cartiq.kafka.dto.UserProfile;
 import com.cartiq.product.dto.ProductDTO;
+import com.cartiq.product.service.CategoryService;
 import com.cartiq.product.service.ProductService;
 import com.cartiq.rag.dto.SearchResult;
 import com.cartiq.rag.service.VectorSearchService;
@@ -32,6 +33,7 @@ public class SuggestionsService {
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final ProductService productService;
+    private final CategoryService categoryService;
     private final VectorSearchService vectorSearchService;
 
     @Value("${cartiq.suggestions.cache.prefix:user-profile:}")
@@ -244,19 +246,24 @@ public class SuggestionsService {
 
             // Build allowed categories from AI search categories + recent categories
             // This ensures vector search results are relevant to what the user is interested in
-            Set<String> allowedCategories = new HashSet<>();
+            Set<String> baseCategories = new HashSet<>();
             if (profile.getAiSearchCategories() != null) {
                 profile.getAiSearchCategories().stream()
                         .filter(c -> c != null && !c.isBlank())
-                        .forEach(allowedCategories::add);
+                        .forEach(baseCategories::add);
             }
             if (profile.getRecentCategories() != null) {
                 profile.getRecentCategories().stream()
                         .filter(c -> c != null && !c.isBlank())
-                        .forEach(allowedCategories::add);
+                        .forEach(baseCategories::add);
             }
 
-            log.debug("AI intent: filtering by categories: {}", allowedCategories);
+            // Expand categories to include all descendants
+            // E.g., "Clothing" -> ["Clothing", "Salwar Suits", "Kurtas", ...]
+            Set<String> allowedCategories = categoryService.expandCategoryNamesWithDescendants(baseCategories);
+
+            log.debug("AI intent: filtering by categories: {} (expanded from {})",
+                    allowedCategories.size(), baseCategories.size());
 
             List<SuggestedProduct> allResults = new ArrayList<>();
             Set<UUID> seenProductIds = new HashSet<>();
