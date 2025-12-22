@@ -91,11 +91,11 @@ public class ProductToolService {
             return executeFtsSearch(query, category, minPrice, maxPrice, minRating);
         }
 
-        // HYBRID SEARCH: Vector + FTS + Category-specific fallback
-        // Category is used for BOOSTING and as a fallback source
+        // HYBRID SEARCH: Vector + FTS + Category + Brand-specific
         List<ProductDTO> vectorResults = List.of();
         List<ProductDTO> ftsResults = List.of();
         List<ProductDTO> categoryResults = List.of();
+        List<ProductDTO> brandResults = List.of();
 
         // 1. Vector Search (semantic) - NO category filter, let embeddings find relevant products
         if (vectorSearchService.isAvailable()) {
@@ -122,16 +122,24 @@ public class ProductToolService {
             }
         }
 
-        // 4. Combine and deduplicate
+        // 4. Brand-specific search (CRITICAL: ensures brand products are found even if in different category)
+        if (brand != null && !brand.isBlank()) {
+            brandResults = productService.getProductsByBrand(brand, PageRequest.of(0, HYBRID_CANDIDATES))
+                    .getContent();
+            log.debug("Brand search for '{}' returned {} candidates", brand, brandResults.size());
+        }
+
+        // 5. Combine and deduplicate - brand results FIRST for highest priority
         Map<UUID, ProductDTO> combinedMap = new LinkedHashMap<>();
-        vectorResults.forEach(p -> combinedMap.put(p.getId(), p));
+        brandResults.forEach(p -> combinedMap.put(p.getId(), p));  // Brand first!
+        vectorResults.forEach(p -> combinedMap.putIfAbsent(p.getId(), p));
         ftsResults.forEach(p -> combinedMap.putIfAbsent(p.getId(), p));
         categoryResults.forEach(p -> combinedMap.putIfAbsent(p.getId(), p));
 
 
         List<ProductDTO> combinedResults = new ArrayList<>(combinedMap.values());
-        log.info("Hybrid search: {} vector + {} FTS + {} category = {} unique candidates",
-                vectorResults.size(), ftsResults.size(), categoryResults.size(), combinedResults.size());
+        log.info("Hybrid search: {} brand + {} vector + {} FTS + {} category = {} unique candidates",
+                brandResults.size(), vectorResults.size(), ftsResults.size(), categoryResults.size(), combinedResults.size());
 
         // 5. Apply a strict, universal post-filter to guarantee all constraints are met.
         // This is the final safety net.
