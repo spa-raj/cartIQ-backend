@@ -181,37 +181,42 @@ public class ProductToolService {
                 ? categoryService.expandCategoryNamesWithDescendants(List.of(category))
                 : Collections.emptySet();
 
-        // If a brand is explicitly passed, use it. Otherwise, try to extract from query.
         final String brandFilter = (brand != null && !brand.isBlank()) ? brand : extractBrandFromQuery(query);
-
-        // When brand is specified, category becomes optional (brand takes priority)
-        // This handles category mismatches like Samsung phones in "Mobiles" vs "Smartphones"
         final boolean hasBrandFilter = brandFilter != null;
+
+        // --- DEBUGGING INJECTION ---
+        final var debugState = new Object() { boolean injected = false; };
+        String debugInfo = String.format(
+            "[DEBUG] brandFilter:'%s', query:'%s', category:'%s', minPrice:%s, maxPrice:%s, allowedCategories:%d",
+            brandFilter, query, category, minPrice, maxPrice, allowedCategories.size()
+        );
+        // --- END DEBUGGING ---
 
         // Start filtering
         List<ProductDTO> filtered = products.stream()
                 .filter(p -> {
-                    // Brand check (strict when specified)
                     boolean brandOk = (brandFilter == null) ||
                             (p.getBrand() != null && p.getBrand().equalsIgnoreCase(brandFilter));
 
-                    // Category check - RELAXED when brand is specified
-                    // If brand matches, category mismatch is acceptable
                     boolean categoryOk = allowedCategories.isEmpty() ||
                             (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName())) ||
-                            (hasBrandFilter && brandOk);  // Brand match overrides category
+                            (hasBrandFilter && brandOk);
 
-                    // Price check
                     boolean maxPriceOk = (maxPrice == null) ||
                             (p.getPrice() != null && p.getPrice().doubleValue() <= maxPrice);
                     boolean minPriceOk = (minPrice == null) ||
                             (p.getPrice() != null && p.getPrice().doubleValue() >= minPrice);
 
-                    // Rating check
                     boolean minRatingOk = (minRating == null) ||
                             (p.getRating() != null && p.getRating().doubleValue() >= minRating);
 
                     return categoryOk && maxPriceOk && minPriceOk && minRatingOk && brandOk;
+                })
+                .peek(p -> { // Inject debug info into the first product's description
+                    if (!debugState.injected) {
+                        p.setDescription(debugInfo + " | Original Desc: " + p.getDescription());
+                        debugState.injected = true;
+                    }
                 })
                 .toList();
 
