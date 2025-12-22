@@ -196,13 +196,15 @@ public class CategoryService {
 
             if (exactMatch.isPresent()) {
                 expandCategory(exactMatch.get(), expanded);
-            } else {
-                // Try fuzzy match (e.g., "Clothing" matches "Clothing & Accessories")
+            } else if (categoryName.length() >= 4) {
+                // Try fuzzy match only for terms >= 4 chars to avoid overly broad matches
+                // (e.g., "art" would match "Cartridges", "Artificial Flowers", etc.)
                 List<Category> fuzzyMatches = categoryRepository.findByNameContainingIgnoreCase(categoryName);
-                for (Category match : fuzzyMatches) {
+                // Limit to first 3 matches to avoid polluting with too many unrelated categories
+                fuzzyMatches.stream().limit(3).forEach(match -> {
                     expanded.add(match.getName());
                     expandCategory(match, expanded);
-                }
+                });
             }
         }
 
