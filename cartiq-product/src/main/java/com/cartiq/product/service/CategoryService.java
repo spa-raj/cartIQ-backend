@@ -180,6 +180,7 @@ public class CategoryService {
      * Expand category names to include all descendant category names.
      * E.g., ["Clothing"] -> ["Clothing", "Salwar Suits", "Kurtas", "T-Shirts", ...]
      * This enables filtering by parent category to also match products in child categories.
+     * Uses fuzzy matching when exact category name doesn't exist.
      */
     @Transactional(readOnly = true)
     public Set<String> expandCategoryNamesWithDescendants(Collection<String> categoryNames) {
@@ -190,17 +191,34 @@ public class CategoryService {
         Set<String> expanded = new HashSet<>(categoryNames);
 
         for (String categoryName : categoryNames) {
-            categoryRepository.findByName(categoryName).ifPresent(category -> {
-                if (category.getPath() != null) {
-                    // Find all descendants using path prefix
-                    List<Category> descendants = categoryRepository
-                            .findByPathStartingWithAndActiveTrue(category.getPath() + " >> ");
-                    descendants.forEach(desc -> expanded.add(desc.getName()));
+            // Try exact match first
+            Optional<Category> exactMatch = categoryRepository.findByName(categoryName);
+
+            if (exactMatch.isPresent()) {
+                expandCategory(exactMatch.get(), expanded);
+            } else {
+                // Try fuzzy match (e.g., "Clothing" matches "Clothing & Accessories")
+                List<Category> fuzzyMatches = categoryRepository.findByNameContainingIgnoreCase(categoryName);
+                for (Category match : fuzzyMatches) {
+                    expanded.add(match.getName());
+                    expandCategory(match, expanded);
                 }
-            });
+            }
         }
 
         log.debug("Expanded {} categories to {} (with descendants)", categoryNames.size(), expanded.size());
         return expanded;
+    }
+
+    /**
+     * Helper: Add category and all its descendants to the expanded set.
+     */
+    private void expandCategory(Category category, Set<String> expanded) {
+        expanded.add(category.getName());
+        if (category.getPath() != null) {
+            List<Category> descendants = categoryRepository
+                    .findByPathStartingWithAndActiveTrue(category.getPath() + " >> ");
+            descendants.forEach(desc -> expanded.add(desc.getName()));
+        }
     }
 }

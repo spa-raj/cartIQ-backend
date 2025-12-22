@@ -63,4 +63,11 @@ public interface CategoryRepository extends JpaRepository<Category, UUID> {
      */
     @Query("SELECT c.id FROM Category c WHERE c.path LIKE CONCAT(:parentPath, ' >> %') AND c.active = true")
     List<UUID> findDescendantCategoryIds(@org.springframework.data.repository.query.Param("parentPath") String parentPath);
+
+    /**
+     * Find categories where name contains the search term (case-insensitive).
+     * Used for fuzzy matching when exact category name doesn't exist.
+     */
+    @Query("SELECT c FROM Category c WHERE LOWER(c.name) LIKE LOWER(CONCAT('%', :searchTerm, '%')) AND c.active = true")
+    List<Category> findByNameContainingIgnoreCase(@org.springframework.data.repository.query.Param("searchTerm") String searchTerm);
 }

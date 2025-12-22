@@ -336,6 +336,7 @@ public class SuggestionsService {
 
     /**
      * Helper: Add search results to suggestions list, with optional category filtering.
+     * Uses fallback: if category filter gives 0 results, returns top unfiltered results.
      */
     private void addSearchResultsToSuggestions(List<SearchResult> results,
                                                 List<SuggestedProduct> allResults,
@@ -353,17 +354,36 @@ public class SuggestionsService {
 
         List<ProductDTO> products = productService.getProductsByIds(productIds);
 
-        for (ProductDTO product : products) {
-            if (allResults.size() >= limit) break;
+        // First pass: try with category filter
+        List<ProductDTO> filteredProducts = new ArrayList<>();
+        List<ProductDTO> unfilteredProducts = new ArrayList<>();
 
-            // Filter by allowed categories if specified
-            if (allowedCategories != null && !allowedCategories.isEmpty()) {
+        for (ProductDTO product : products) {
+            if (seenProductIds.contains(product.getId())) continue;
+            unfilteredProducts.add(product);
+
+            // Check category filter
+            if (allowedCategories == null || allowedCategories.isEmpty()) {
+                filteredProducts.add(product);
+            } else {
                 String productCategory = product.getCategoryName();
-                if (productCategory == null || !allowedCategories.contains(productCategory)) {
-                    continue; // Skip products not in allowed categories
+                if (productCategory != null && allowedCategories.contains(productCategory)) {
+                    filteredProducts.add(product);
                 }
             }
+        }
 
+        // Fallback: if filtering gave 0 results, use unfiltered top results
+        List<ProductDTO> finalProducts;
+        if (filteredProducts.isEmpty() && !unfilteredProducts.isEmpty()) {
+            log.debug("Category filter returned 0/{} results, using unfiltered as fallback", unfilteredProducts.size());
+            finalProducts = unfilteredProducts;
+        } else {
+            finalProducts = filteredProducts;
+        }
+
+        for (ProductDTO product : finalProducts) {
+            if (allResults.size() >= limit) break;
             if (seenProductIds.add(product.getId())) {
                 allResults.add(SuggestedProduct.fromStrategy(product, strategy, context));
             }
