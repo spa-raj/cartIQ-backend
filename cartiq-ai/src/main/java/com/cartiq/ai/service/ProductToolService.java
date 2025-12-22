@@ -164,9 +164,6 @@ public class ProductToolService {
     /**
      * Applies a strict filter for all user-provided constraints. This is a safety net
      * to ensure that all returned products match the user's explicit request.
-     *
-     * IMPORTANT: When brand is explicitly specified, category filter is relaxed.
-     * This handles cases where Samsung phones are in "Mobiles" instead of "Smartphones".
      */
     private List<ProductDTO> applyUniversalFilter(
             List<ProductDTO> products,
@@ -182,25 +179,31 @@ public class ProductToolService {
                 ? categoryService.expandCategoryNamesWithDescendants(List.of(category))
                 : Collections.emptySet();
 
+        // Log the expanded categories for debugging
+        log.info("CATEGORY FILTER DEBUG: Requested category='{}', Expanded to: {}",
+                category, allowedCategories);
+
         // If a brand is explicitly passed, use it. Otherwise, try to extract from query.
         final String brandFilter = (brand != null && !brand.isBlank()) ? brand : extractBrandFromQuery(query);
 
-        // When brand is specified, category becomes optional (brand takes priority)
-        // This handles category mismatches like Samsung phones in "Mobiles" vs "Smartphones"
-        final boolean hasBrandFilter = brandFilter != null;
+        // Log unique categories in candidates for debugging
+        Set<String> candidateCategories = products.stream()
+                .map(ProductDTO::getCategoryName)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        log.info("CANDIDATE CATEGORIES DEBUG: {} unique categories in {} candidates: {}",
+                candidateCategories.size(), products.size(), candidateCategories);
 
-        // Start filtering
+        // Start filtering - ALL filters are strict
         List<ProductDTO> filtered = products.stream()
                 .filter(p -> {
                     // Brand check (strict when specified)
                     boolean brandOk = (brandFilter == null) ||
                             (p.getBrand() != null && p.getBrand().equalsIgnoreCase(brandFilter));
 
-                    // Category check - RELAXED when brand is specified
-                    // If brand matches, category mismatch is acceptable
+                    // Category check (strict - Samsung TVs should NOT match Smartphones)
                     boolean categoryOk = allowedCategories.isEmpty() ||
-                            (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName())) ||
-                            (hasBrandFilter && brandOk);  // Brand match overrides category
+                            (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName()));
 
                     // Price check
                     boolean maxPriceOk = (maxPrice == null) ||
@@ -212,9 +215,22 @@ public class ProductToolService {
                     boolean minRatingOk = (minRating == null) ||
                             (p.getRating() != null && p.getRating().doubleValue() >= minRating);
 
+                    // Log each filtered product for debugging (only first 10)
+                    if (!categoryOk && brandOk && maxPriceOk) {
+                        log.debug("REJECTED by category: {} (category={}, allowedCategories={})",
+                                p.getName(), p.getCategoryName(), allowedCategories);
+                    }
+
                     return categoryOk && maxPriceOk && minPriceOk && minRatingOk && brandOk;
                 })
                 .toList();
+
+        // Log which products passed the filter
+        if (!filtered.isEmpty()) {
+            log.info("FILTERED PRODUCTS DEBUG: {} products passed. Categories: {}",
+                    filtered.size(),
+                    filtered.stream().map(ProductDTO::getCategoryName).distinct().toList());
+        }
 
         log.info("Universal Post-Filter: {} -> {} products. Filters: category={}, brand={}, minPrice={}, maxPrice={}, minRating={}",
                 products.size(), filtered.size(), category, brandFilter, minPrice, maxPrice, minRating);
