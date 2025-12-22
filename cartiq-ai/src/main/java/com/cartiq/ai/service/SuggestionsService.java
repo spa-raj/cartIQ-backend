@@ -74,26 +74,13 @@ public class SuggestionsService {
             log.debug("Similar products strategy returned {} products", similarProducts.size());
         }
 
-        // Strategy 3: Category affinity (20% of results)
+        // Strategy 3: Category affinity (fills remaining slots)
+        // No cap - fill all remaining with personalized category products
         if (profile != null && hasCategories(profile) && remaining > 0) {
-            int categoryLimit = Math.min(remaining, (int) Math.ceil(limit * 0.2));
-            List<SuggestedProduct> categoryProducts = getCategoryProducts(profile, categoryLimit, suggestions);
+            List<SuggestedProduct> categoryProducts = getCategoryProducts(profile, remaining, suggestions);
             suggestions.addAll(categoryProducts);
-            remaining -= categoryProducts.size();
             strategyUsed.put("category_affinity", String.valueOf(categoryProducts.size()));
             log.debug("Category affinity strategy returned {} products", categoryProducts.size());
-        }
-
-        // Strategy 4: Cold start / Fill remaining
-        // Cap trending to 50% max when user has profile (ensures personalized content priority)
-        if (remaining > 0) {
-            int maxTrending = profile != null
-                    ? Math.min(remaining, (int) Math.ceil(limit * 0.5))
-                    : remaining; // No cap for anonymous users (cold start)
-            List<SuggestedProduct> trendingProducts = getTrendingProducts(maxTrending, suggestions);
-            suggestions.addAll(trendingProducts);
-            strategyUsed.put("trending", String.valueOf(trendingProducts.size()));
-            log.debug("Trending strategy returned {} products (capped to {})", trendingProducts.size(), maxTrending);
         }
 
         // Final deduplication and limit
@@ -467,12 +454,14 @@ public class SuggestionsService {
 
     /**
      * Strategy 3: Category Products
-     * Top-rated products in user's browsed categories, filtered by price preference
+     * Top-rated products in user's browsed categories, filtered by price preference.
+     * Uses round-robin approach to ensure diversity across all categories.
      */
     private List<SuggestedProduct> getCategoryProducts(UserProfile profile, int limit, List<SuggestedProduct> existing) {
         try {
             List<String> categories = profile.getRecentCategories().stream()
                     .filter(c -> c != null && !c.isBlank())
+                    .limit(5) // Cap to top 5 categories to avoid too many queries
                     .toList();
 
             if (categories.isEmpty()) {
@@ -481,54 +470,60 @@ public class SuggestionsService {
 
             PriceRange priceRange = getPriceRange(profile.getPricePreference());
 
-            List<ProductDTO> categoryProducts = productService.findTopRatedByCategories(
-                    categories,
-                    priceRange.min(),
-                    priceRange.max(),
-                    limit + existing.size() // Get extra to account for filtering
-            );
-
-            // Filter out already included products
+            // Track already included product IDs
             Set<UUID> existingIds = existing.stream()
                     .map(sp -> sp.getProduct().getId())
                     .collect(Collectors.toSet());
+            Set<UUID> addedIds = new HashSet<>(existingIds);
 
-            // Context: primary category
-            String primaryCategory = categories.get(0);
+            // Fetch top products per category (get extra to handle duplicates)
+            int productsPerCategory = Math.max(2, (limit / categories.size()) + 1);
+            Map<String, List<ProductDTO>> categoryProductsMap = new LinkedHashMap<>();
 
-            return categoryProducts.stream()
-                    .filter(p -> !existingIds.contains(p.getId()))
-                    .limit(limit)
-                    .map(p -> SuggestedProduct.fromStrategy(p, "category_affinity",
-                            p.getCategoryName() != null ? p.getCategoryName() : primaryCategory))
-                    .toList();
+            for (String category : categories) {
+                List<ProductDTO> products = productService.findTopRatedByCategories(
+                        List.of(category),
+                        priceRange.min(),
+                        priceRange.max(),
+                        productsPerCategory
+                );
+                categoryProductsMap.put(category, new ArrayList<>(products));
+            }
+
+            // Round-robin: pick 1 product from each category in rotation until we have enough
+            List<SuggestedProduct> results = new ArrayList<>();
+            Map<String, Integer> categoryIndex = new HashMap<>();
+            categories.forEach(c -> categoryIndex.put(c, 0));
+
+            int maxRounds = productsPerCategory;
+            for (int round = 0; round < maxRounds && results.size() < limit; round++) {
+                for (String category : categories) {
+                    if (results.size() >= limit) break;
+
+                    List<ProductDTO> products = categoryProductsMap.get(category);
+                    int idx = categoryIndex.get(category);
+
+                    // Find next product from this category that hasn't been added
+                    while (idx < products.size()) {
+                        ProductDTO product = products.get(idx);
+                        idx++;
+                        categoryIndex.put(category, idx);
+
+                        if (!addedIds.contains(product.getId())) {
+                            addedIds.add(product.getId());
+                            results.add(SuggestedProduct.fromStrategy(product, "category_affinity", category));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            log.debug("Category affinity: {} products from {} categories (round-robin)",
+                    results.size(), categories.size());
+            return results;
 
         } catch (Exception e) {
             log.warn("Category products strategy failed: {}", e.getMessage());
-            return List.of();
-        }
-    }
-
-    /**
-     * Strategy 4: Trending/Featured Products (Cold Start)
-     */
-    private List<SuggestedProduct> getTrendingProducts(int limit, List<SuggestedProduct> existing) {
-        try {
-            List<ProductDTO> trendingProducts = productService.getTopFeaturedProducts(limit + existing.size());
-
-            // Filter out already included products
-            Set<UUID> existingIds = existing.stream()
-                    .map(sp -> sp.getProduct().getId())
-                    .collect(Collectors.toSet());
-
-            return trendingProducts.stream()
-                    .filter(p -> !existingIds.contains(p.getId()))
-                    .limit(limit)
-                    .map(p -> SuggestedProduct.fromStrategy(p, "trending", null))
-                    .toList();
-
-        } catch (Exception e) {
-            log.warn("Trending products strategy failed: {}", e.getMessage());
             return List.of();
         }
     }
