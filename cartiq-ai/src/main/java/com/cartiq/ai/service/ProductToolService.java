@@ -86,8 +86,9 @@ public class ProductToolService {
         log.info("Executing searchProducts: query={}, category={}, brand={}, minPrice={}, maxPrice={}, minRating={}",
                 query, category, brand, minPrice, maxPrice, minRating);
 
-        // If no query, just use FTS/category search
-        if (query == null || query.isBlank()) {
+        // If no query AND no brand filter, just use FTS/category search
+        // When brand is specified, we MUST go through hybrid search to apply brand filtering
+        if ((query == null || query.isBlank()) && (brand == null || brand.isBlank())) {
             return executeFtsSearch(query, category, minPrice, maxPrice, minRating);
         }
 
