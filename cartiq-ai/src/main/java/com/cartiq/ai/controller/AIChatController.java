@@ -3,10 +3,7 @@ package com.cartiq.ai.controller;
 import com.cartiq.ai.dto.ChatRequest;
 import com.cartiq.ai.dto.ChatResponse;
 import com.cartiq.ai.service.GeminiService;
-import com.cartiq.kafka.service.ChatContextService;
 import com.cartiq.ai.service.GeminiService.ChatResult;
-import com.cartiq.kafka.dto.LastSearchContext;
-import com.cartiq.kafka.dto.UserProfile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -36,7 +33,6 @@ import java.util.UUID;
 public class AIChatController {
 
     private final GeminiService geminiService;
-    private final ChatContextService chatContextService;
 
     /**
      * Send a chat message to the AI assistant.
@@ -65,8 +61,8 @@ public class AIChatController {
         log.info("Chat request: userId={}, sessionId={}, message={}",
                 userId, finalSessionId, truncate(request.getMessage(), 100));
 
-        // Build user context from request + Redis chat memory
-        Map<String, Object> userContext = buildUserContext(request, userId);
+        // Build user context from request
+        Map<String, Object> userContext = buildUserContext(request);
 
         // Process with Gemini (includes function calling)
         ChatResult result = geminiService.chat(
@@ -123,10 +119,9 @@ public class AIChatController {
 
     // ==================== Helper Methods ====================
 
-    private Map<String, Object> buildUserContext(ChatRequest request, String userId) {
+    private Map<String, Object> buildUserContext(ChatRequest request) {
         Map<String, Object> context = new HashMap<>();
 
-        // Context from request
         if (request.getPricePreference() != null) {
             context.put("pricePreference", request.getPricePreference());
         }
@@ -142,45 +137,6 @@ public class AIChatController {
         }
         if (request.getCartTotal() != null) {
             context.put("cartTotal", request.getCartTotal());
-        }
-
-        // Fetch chat memory context from Redis
-        try {
-            UserProfile profile = chatContextService.getUserProfile(userId);
-            if (profile != null) {
-                // Last viewed product context (for "accessories for this")
-                if (profile.getLastViewedProductId() != null) {
-                    context.put("lastViewedProductId", profile.getLastViewedProductId());
-                    if (profile.getLastViewedProductName() != null) {
-                        context.put("lastViewedProductName", profile.getLastViewedProductName());
-                    }
-                    if (profile.getLastViewedProductCategory() != null) {
-                        context.put("lastViewedProductCategory", profile.getLastViewedProductCategory());
-                    }
-                }
-
-                // Last search context (for "show me cheaper ones")
-                LastSearchContext searchContext = profile.getLastSearchContext();
-                if (searchContext != null) {
-                    if (searchContext.getQuery() != null) {
-                        context.put("lastSearchQuery", searchContext.getQuery());
-                    }
-                    if (searchContext.getCategory() != null) {
-                        context.put("lastSearchCategory", searchContext.getCategory());
-                    }
-                    if (searchContext.getBrand() != null) {
-                        context.put("lastSearchBrand", searchContext.getBrand());
-                    }
-                    if (searchContext.getMaxPrice() != null) {
-                        context.put("lastSearchMaxPrice", searchContext.getMaxPrice());
-                    }
-                    if (searchContext.getMinPrice() != null) {
-                        context.put("lastSearchMinPrice", searchContext.getMinPrice());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Could not fetch chat context for userId={}: {}", userId, e.getMessage());
         }
 
         return context;

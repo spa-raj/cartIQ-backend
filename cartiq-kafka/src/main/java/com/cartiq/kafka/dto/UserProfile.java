@@ -57,12 +57,6 @@ public class UserProfile implements Serializable {
     private Long aiProductSearches;
     private Long aiProductComparisons;
 
-    // Chat Memory Context (for contextual follow-ups)
-    private String lastViewedProductId;        // Last product viewed - for "accessories for this"
-    private String lastViewedProductName;      // Product name for context
-    private String lastViewedProductCategory;  // Category for finding related items
-    private LastSearchContext lastSearchContext; // Last search params - for "show me cheaper"
-
     // Order History (HIGHEST intent - actual purchases)
     private Long totalOrders;
     private Double totalSpent;
