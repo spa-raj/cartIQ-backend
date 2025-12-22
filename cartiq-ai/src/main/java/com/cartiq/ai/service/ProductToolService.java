@@ -210,16 +210,37 @@ public class ProductToolService {
         log.info("CANDIDATE CATEGORIES DEBUG: {} unique categories in {} candidates: {}",
                 candidateCategories.size(), products.size(), candidateCategories);
 
-        // Start filtering - ALL filters are strict
+        // Build relaxed category set for brand+category queries
+        // When brand is specified, also allow RELATED categories (same product domain)
+        // e.g., "Puma running shoes" → also allow Puma sneakers, sports shoes
+        // BUT "Samsung smartphones" → do NOT allow Samsung TVs (different domain)
+        final Set<String> relaxedCategories = (brandFilter != null && !allowedCategories.isEmpty())
+                ? expandToRelatedCategories(allowedCategories)
+                : Collections.emptySet();
+
         List<ProductDTO> filtered = products.stream()
                 .filter(p -> {
                     // Brand check (strict when specified)
                     boolean brandOk = (brandFilter == null) ||
                             (p.getBrand() != null && p.getBrand().equalsIgnoreCase(brandFilter));
 
-                    // Category check (strict - Samsung TVs should NOT match Smartphones)
-                    boolean categoryOk = allowedCategories.isEmpty() ||
-                            (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName()));
+                    // Category check - use relaxed categories when brand matches
+                    boolean categoryOk;
+                    if (allowedCategories.isEmpty()) {
+                        categoryOk = true;
+                    } else if (brandOk && brandFilter != null && !relaxedCategories.isEmpty()) {
+                        // Brand matches - allow related categories from same product domain
+                        categoryOk = (p.getCategoryName() != null &&
+                                (allowedCategories.contains(p.getCategoryName()) ||
+                                 relaxedCategories.contains(p.getCategoryName())));
+                        if (categoryOk && !allowedCategories.contains(p.getCategoryName())) {
+                            log.debug("RELAXED category for brand match: {} (actual={}, wanted={}, relaxed={})",
+                                    p.getName(), p.getCategoryName(), allowedCategories, relaxedCategories);
+                        }
+                    } else {
+                        // No brand filter OR brand doesn't match - enforce category strictly
+                        categoryOk = (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName()));
+                    }
 
                     // Price check
                     boolean maxPriceOk = (maxPrice == null) ||
@@ -231,10 +252,10 @@ public class ProductToolService {
                     boolean minRatingOk = (minRating == null) ||
                             (p.getRating() != null && p.getRating().doubleValue() >= minRating);
 
-                    // Log each filtered product for debugging (only first 10)
-                    if (!categoryOk && brandOk && maxPriceOk) {
-                        log.debug("REJECTED by category: {} (category={}, allowedCategories={})",
-                                p.getName(), p.getCategoryName(), allowedCategories);
+                    // Log rejected products for debugging
+                    if (!categoryOk && brandOk && brandFilter != null) {
+                        log.debug("REJECTED by category (not in domain): {} (category={}, allowed={}, relaxed={})",
+                                p.getName(), p.getCategoryName(), allowedCategories, relaxedCategories);
                     }
 
                     return categoryOk && maxPriceOk && minPriceOk && minRatingOk && brandOk;
@@ -277,6 +298,76 @@ public class ProductToolService {
         return null;
     }
 
+    /**
+     * Expands category names to include related categories within the same product domain.
+     * This allows "Puma running shoes" to match Puma sneakers, but prevents
+     * "Samsung smartphones" from matching Samsung TVs.
+     *
+     * Category domains are defined based on ACTUAL database categories.
+     * - Footwear: Running Shoes, Sneakers, Sports Shoes, Casual Shoes, etc.
+     * - Phones: Smartphones only (strict - no tablets, TVs)
+     * - Audio: Headphones, On-Ear, Over-Ear
+     */
+    private Set<String> expandToRelatedCategories(Set<String> requestedCategories) {
+        Set<String> expanded = new HashSet<>();
+
+        // Define related category groups based on ACTUAL database categories
+        // Each group contains categories that are acceptable substitutes for each other
+        List<Set<String>> categoryDomains = List.of(
+                // Footwear domain - all shoe types are related (from actual DB)
+                Set.of("Running Shoes", "Running Shoes (Sports & Outdoor Shoes)",
+                       "Sneakers", "Sneakers (Casual Shoes)",
+                       "Sports & Outdoor Shoes", "Sports & Outdoor Shoes (Women's Shoes)",
+                       "Casual Shoes", "Casual Shoes (Women's Shoes)",
+                       "Walking Shoes", "Walking Shoes (Sports & Outdoor Shoes)",
+                       "Training Shoes", "Men's Shoes", "Women's Shoes",
+                       "Flip-Flops & Slippers", "Flip-Flops & Slippers (Men's Shoes)",
+                       "Fashion Sandals", "Fashion Slippers", "Sandals & Floaters",
+                       "Athletic & Outdoor Sandals", "Ethnic Footwear",
+                       "Boots", "Boots (Women's Shoes)", "Formal Shoes",
+                       "Badminton Shoes", "Cricket Shoes", "Football Shoes",
+                       "Loafers & Moccasins (Casual Shoes)", "Clogs & Mules (Casual Shoes)"),
+
+                // Audio domain - headphones/earphones are related (from actual DB)
+                Set.of("Headphones", "Headphones, Earbuds & Accessories",
+                       "On-Ear", "Over-Ear"),
+
+                // Clothing tops domain (from actual DB)
+                Set.of("T-Shirts", "T-Shirts (Tops, T-Shirts & Shirts)",
+                       "T-Shirts (Shirts & Tees)", "T-Shirts (Sports T-Shirts & Jerseys)",
+                       "Shirts", "Shirts (Tops, T-Shirts & Shirts)", "Shirts & Tees",
+                       "Polos (Tops, T-Shirts & Shirts)", "Polos (Sports T-Shirts & Jerseys)",
+                       "Blouses", "Blouses (Shirts)", "Tank Tops", "Tank Tops (Shirts & Tees)",
+                       "Tops, T-Shirts & Shirts", "T-shirts, Polos & Shirts", "Button-Down Shirts"),
+
+                // Clothing bottoms domain (from actual DB)
+                Set.of("Trousers", "Casual Trousers", "Formal Trousers",
+                       "Suit Trousers", "Trousers (Sportswear)",
+                       "Jeans & Jeggings", "Pants", "Sweatpants")
+
+                // NOTE: These are intentionally NOT grouped (strict category matching):
+                // - Smartphones, Smartphones & Basic Mobiles (phones only)
+                // - Televisions, Smart Televisions (TVs only)
+                // - Laptops, 2 in 1 Laptops, Traditional Laptops (laptops only)
+        );
+
+        for (String requested : requestedCategories) {
+            for (Set<String> domain : categoryDomains) {
+                if (domain.stream().anyMatch(cat -> cat.equalsIgnoreCase(requested) ||
+                        requested.toLowerCase().contains(cat.toLowerCase()) ||
+                        cat.toLowerCase().contains(requested.toLowerCase()))) {
+                    expanded.addAll(domain);
+                    break;
+                }
+            }
+        }
+
+        if (!expanded.isEmpty()) {
+            log.debug("Expanded categories {} to related domain: {}", requestedCategories, expanded);
+        }
+
+        return expanded;
+    }
 
     /**
      * Rerank combined results using Cross-Encoder model.
