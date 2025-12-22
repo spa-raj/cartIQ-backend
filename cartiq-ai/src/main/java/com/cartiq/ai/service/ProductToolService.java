@@ -120,6 +120,30 @@ public class ProductToolService {
         log.info("Hybrid search: {} vector + {} FTS = {} unique candidates",
                 vectorResults.size(), ftsResults.size(), combinedResults.size());
 
+        // 4. Apply category filter if specified (post-filter since FTS doesn't support category+query)
+        if (category != null && !category.isBlank()) {
+            UUID categoryId = findCategoryIdByName(category);
+            Set<String> allowedCategories = new HashSet<>();
+
+            if (categoryId != null) {
+                // Get category and all descendants
+                allowedCategories = categoryService.expandCategoryNamesWithDescendants(List.of(category));
+            }
+
+            if (!allowedCategories.isEmpty()) {
+                Set<String> finalAllowedCategories = allowedCategories;
+                List<ProductDTO> filtered = combinedResults.stream()
+                        .filter(p -> p.getCategoryName() != null &&
+                                finalAllowedCategories.contains(p.getCategoryName()))
+                        .toList();
+
+                log.info("Category filter '{}': {} -> {} products (allowed categories: {})",
+                        category, combinedResults.size(), filtered.size(), allowedCategories.size());
+
+                combinedResults = new ArrayList<>(filtered);
+            }
+        }
+
         // If no results at all, return empty
         if (combinedResults.isEmpty()) {
             return List.of();
@@ -130,7 +154,7 @@ public class ProductToolService {
             return combinedResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, combinedResults.size()));
         }
 
-        // 4. Rerank using Cross-Encoder
+        // 5. Rerank using Cross-Encoder
         return rerankResults(query, combinedResults);
     }
 
