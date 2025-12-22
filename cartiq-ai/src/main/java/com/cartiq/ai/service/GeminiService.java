@@ -402,7 +402,7 @@ public class GeminiService {
                                         .properties(Map.of(
                                                 "query", Schema.builder()
                                                         .type(Type.Known.STRING)
-                                                        .description("Search text for product name or description (do NOT include brand name here if using brand filter)")
+                                                        .description("Search text including brand and product type (e.g., 'Samsung phones', 'Apple laptops', 'Sony headphones'). ALWAYS include the brand name in the query when user mentions a specific brand.")
                                                         .build(),
                                                 "category", Schema.builder()
                                                         .type(Type.Known.STRING)

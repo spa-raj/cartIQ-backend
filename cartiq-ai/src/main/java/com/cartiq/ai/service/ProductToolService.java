@@ -98,14 +98,19 @@ public class ProductToolService {
         List<ProductDTO> categoryResults = List.of();
         List<ProductDTO> brandResults = List.of();
 
+        // Build effective query: use brand as query if query is null but brand is specified
+        // This ensures FTS finds brand products with price filters applied
+        String effectiveQuery = (query != null && !query.isBlank()) ? query :
+                (brand != null && !brand.isBlank()) ? brand : null;
+
         // 1. Vector Search (semantic) - NO category filter, let embeddings find relevant products
-        if (vectorSearchService.isAvailable()) {
-            vectorResults = executeVectorSearch(query, null, minPrice, maxPrice, minRating);
+        if (vectorSearchService.isAvailable() && effectiveQuery != null) {
+            vectorResults = executeVectorSearch(effectiveQuery, null, minPrice, maxPrice, minRating);
             log.debug("Vector search returned {} candidates", vectorResults.size());
         }
 
-        // 2. FTS Search (keyword) - NO category filter
-        ftsResults = executeFtsSearchWithLimit(query, null, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
+        // 2. FTS Search (keyword) - uses effectiveQuery (brand as fallback)
+        ftsResults = executeFtsSearchWithLimit(effectiveQuery, null, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
         log.debug("FTS search returned {} candidates", ftsResults.size());
 
         // 3. Category-specific search (fallback to ensure we have products from target category)
