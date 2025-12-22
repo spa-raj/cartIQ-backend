@@ -122,89 +122,111 @@ public class ProductToolService {
             }
         }
 
-        // 4. Combine and deduplicate (category results first for relevance)
+        // 4. Combine and deduplicate
         Map<UUID, ProductDTO> combinedMap = new LinkedHashMap<>();
+        vectorResults.forEach(p -> combinedMap.put(p.getId(), p));
+        ftsResults.forEach(p -> combinedMap.putIfAbsent(p.getId(), p));
+        categoryResults.forEach(p -> combinedMap.putIfAbsent(p.getId(), p));
 
-        // Add category results first (most relevant to user's intent)
-        for (ProductDTO product : categoryResults) {
-            combinedMap.put(product.getId(), product);
-        }
-
-        // Add vector results (semantic relevance)
-        for (ProductDTO product : vectorResults) {
-            combinedMap.putIfAbsent(product.getId(), product);
-        }
-
-        // Add FTS results (keyword matches)
-        for (ProductDTO product : ftsResults) {
-            combinedMap.putIfAbsent(product.getId(), product);
-        }
 
         List<ProductDTO> combinedResults = new ArrayList<>(combinedMap.values());
-        log.info("Hybrid search: {} category + {} vector + {} FTS = {} unique candidates",
-                categoryResults.size(), vectorResults.size(), ftsResults.size(), combinedResults.size());
+        log.info("Hybrid search: {} vector + {} FTS + {} category = {} unique candidates",
+                vectorResults.size(), ftsResults.size(), categoryResults.size(), combinedResults.size());
 
-        // 4. Apply BRAND FILTER - strict filtering, only show products from specified brand
-        if (brand != null && !brand.isBlank()) {
-            String brandLower = brand.toLowerCase().trim();
-            List<ProductDTO> brandFiltered = combinedResults.stream()
-                    .filter(p -> p.getBrand() != null &&
-                            p.getBrand().toLowerCase().contains(brandLower))
-                    .toList();
-
-            log.info("Brand filter '{}': {} -> {} products", brand, combinedResults.size(), brandFiltered.size());
-
-            // If brand filter returns results, use them; otherwise keep original for fallback
-            if (!brandFiltered.isEmpty()) {
-                combinedResults = new ArrayList<>(brandFiltered);
-            } else {
-                log.warn("Brand '{}' not found in results, keeping all {} products", brand, combinedResults.size());
-            }
-        }
-
-        // 5. Apply category BOOSTING (not filtering) - products matching category come first
-        if (category != null && !category.isBlank()) {
-            Set<String> allowedCategories = categoryService.expandCategoryNamesWithDescendants(List.of(category));
-
-            if (!allowedCategories.isEmpty()) {
-                // Partition: matching categories first, then others
-                List<ProductDTO> matchingCategory = new ArrayList<>();
-                List<ProductDTO> otherProducts = new ArrayList<>();
-
-                for (ProductDTO product : combinedResults) {
-                    if (product.getCategoryName() != null && allowedCategories.contains(product.getCategoryName())) {
-                        matchingCategory.add(product);
-                    } else {
-                        otherProducts.add(product);
-                    }
-                }
-
-                // Combine: category matches first, then others as fallback
-                List<ProductDTO> boostedResults = new ArrayList<>(matchingCategory);
-                boostedResults.addAll(otherProducts);
-
-                log.info("Category boost '{}': {} matching + {} others (allowed: {})",
-                        category, matchingCategory.size(), otherProducts.size(), allowedCategories);
-
-                combinedResults = boostedResults;
-            } else {
-                log.warn("Category '{}' not found, using semantic ranking only", category);
-            }
-        }
+        // 5. Apply a strict, universal post-filter to guarantee all constraints are met.
+        // This is the final safety net.
+        List<ProductDTO> finalResults = applyUniversalFilter(
+                combinedResults, query, category, brand, minPrice, maxPrice, minRating);
 
         // If no results at all, return empty
-        if (combinedResults.isEmpty()) {
+        if (finalResults.isEmpty()) {
             return List.of();
         }
 
         // If only a few results or reranker not available, return as-is
-        if (combinedResults.size() <= DEFAULT_PAGE_SIZE || !rerankerService.isAvailable()) {
-            return combinedResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, combinedResults.size()));
+        if (finalResults.size() <= DEFAULT_PAGE_SIZE || !rerankerService.isAvailable()) {
+            return finalResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, finalResults.size()));
         }
 
-        // 5. Rerank using Cross-Encoder (will consider semantic relevance)
-        return rerankResults(query, combinedResults);
+        // 6. Rerank the clean, filtered list
+        return rerankResults(query, finalResults);
     }
+
+    /**
+     * Applies a strict filter for all user-provided constraints. This is a safety net
+     * to ensure that all returned products match the user's explicit request.
+     */
+    private List<ProductDTO> applyUniversalFilter(
+            List<ProductDTO> products,
+            String query,
+            String category,
+            String brand,
+            Double minPrice,
+            Double maxPrice,
+            Double minRating) {
+
+        // Prepare filters
+        final Set<String> allowedCategories = (category != null && !category.isBlank())
+                ? categoryService.expandCategoryNamesWithDescendants(List.of(category))
+                : Collections.emptySet();
+
+        // If a brand is explicitly passed, use it. Otherwise, try to extract from query.
+        final String brandFilter = (brand != null && !brand.isBlank()) ? brand : extractBrandFromQuery(query);
+
+        // Start filtering
+        List<ProductDTO> filtered = products.stream()
+                .filter(p -> {
+                    // Category check
+                    boolean categoryOk = allowedCategories.isEmpty() ||
+                            (p.getCategoryName() != null && allowedCategories.contains(p.getCategoryName()));
+
+                    // Price check
+                    boolean maxPriceOk = (maxPrice == null) ||
+                            (p.getPrice() != null && p.getPrice().doubleValue() <= maxPrice);
+                    boolean minPriceOk = (minPrice == null) ||
+                            (p.getPrice() != null && p.getPrice().doubleValue() >= minPrice);
+
+                    // Rating check
+                    boolean minRatingOk = (minRating == null) ||
+                            (p.getRating() != null && p.getRating().doubleValue() >= minRating);
+
+                    // Brand check
+                    boolean brandOk = (brandFilter == null) ||
+                            (p.getBrand() != null && p.getBrand().equalsIgnoreCase(brandFilter));
+
+                    return categoryOk && maxPriceOk && minPriceOk && minRatingOk && brandOk;
+                })
+                .toList();
+
+        log.info("Universal Post-Filter: {} -> {} products. Filters: category={}, brand={}, minPrice={}, maxPrice={}, minRating={}",
+                products.size(), filtered.size(), category, brandFilter, minPrice, maxPrice, minRating);
+
+        return filtered;
+    }
+
+    /**
+     * Simple heuristic to extract a known brand from the query string.
+     */
+    private String extractBrandFromQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        String lowerQuery = query.toLowerCase();
+        // This could be expanded or moved to a configuration
+        if (lowerQuery.contains("samsung")) return "Samsung";
+        if (lowerQuery.contains("apple") || lowerQuery.contains("iphone")) return "Apple";
+        if (lowerQuery.contains("oneplus")) return "OnePlus";
+        if (lowerQuery.contains("google") || lowerQuery.contains("pixel")) return "Google";
+        if (lowerQuery.contains("sony")) return "Sony";
+        if (lowerQuery.contains("jbl")) return "JBL";
+        if (lowerQuery.contains("bose")) return "Bose";
+        if (lowerQuery.contains("boat")) return "boAt";
+        if (lowerQuery.contains("marshall")) return "Marshall";
+        if (lowerQuery.contains("nike")) return "Nike";
+        if (lowerQuery.contains("iqoo")) return "iQOO";
+        return null;
+    }
+
 
     /**
      * Rerank combined results using Cross-Encoder model.
