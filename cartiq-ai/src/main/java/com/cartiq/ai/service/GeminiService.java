@@ -298,14 +298,15 @@ public class GeminiService {
                 case "searchProducts" -> {
                     String query = (String) args.get("query");
                     String category = (String) args.get("category");
+                    String brand = (String) args.get("brand");
                     Double minPrice = toDouble(args.get("minPrice"));
                     Double maxPrice = toDouble(args.get("maxPrice"));
                     Double minRating = toDouble(args.get("minRating"));
 
-                    log.info("searchProducts params: query='{}', category='{}', minPrice={}, maxPrice={}, minRating={}",
-                            query, category, minPrice, maxPrice, minRating);
+                    log.info("searchProducts params: query='{}', category='{}', brand='{}', minPrice={}, maxPrice={}, minRating={}",
+                            query, category, brand, minPrice, maxPrice, minRating);
 
-                    products = productToolService.executeSearchProducts(query, category, minPrice, maxPrice, minRating);
+                    products = productToolService.executeSearchProducts(query, category, brand, minPrice, maxPrice, minRating);
                     log.info("searchProducts returned {} products", products.size());
                     responseData.put("products", productsToMap(products));
                     responseData.put("count", products.size());
@@ -395,17 +396,21 @@ public class GeminiService {
                         // searchProducts
                         FunctionDeclaration.builder()
                                 .name("searchProducts")
-                                .description("Search for products with optional filters. Use this when user wants to find products by category, price range, or search query.")
+                                .description("Search for products with optional filters. Use this when user wants to find products by category, brand, price range, or search query.")
                                 .parameters(Schema.builder()
                                         .type(Type.Known.OBJECT)
                                         .properties(Map.of(
                                                 "query", Schema.builder()
                                                         .type(Type.Known.STRING)
-                                                        .description("Search text for product name, description, or brand")
+                                                        .description("Search text for product name or description (do NOT include brand name here if using brand filter)")
                                                         .build(),
                                                 "category", Schema.builder()
                                                         .type(Type.Known.STRING)
-                                                        .description("Product category to filter by (e.g., 'Electronics', 'Clothing')")
+                                                        .description("Product category to filter by (e.g., 'Smartphones', 'Laptops', 'Televisions')")
+                                                        .build(),
+                                                "brand", Schema.builder()
+                                                        .type(Type.Known.STRING)
+                                                        .description("Brand name to filter by (e.g., 'Samsung', 'Apple', 'Sony'). ALWAYS use this when user mentions a specific brand.")
                                                         .build(),
                                                 "minPrice", Schema.builder()
                                                         .type(Type.Known.NUMBER)
@@ -519,18 +524,23 @@ public class GeminiService {
         prompt.append(categoryList);
         prompt.append("""
 
-                IMPORTANT RULES FOR CATEGORY SELECTION:
+                IMPORTANT RULES FOR SEARCH:
                 1. ALWAYS include the category parameter when calling searchProducts.
                 2. Choose the MOST RELEVANT category from the list above based on the user's query.
-                3. For "mobile phones", "phones", "cell phones" → use "Smartphones"
-                4. For "TVs", "television" → use "Televisions" or "Smart Televisions"
-                5. For "headphones", "earphones", "earbuds" → use "Headphones" or related category
-                6. When user mentions a brand AND a product type, use searchProducts with both query and category.
-                7. Only use getProductsByBrand when user asks for ALL products from a brand without specifying a type.
+                3. For "mobile phones", "phones", "cell phones" → use category="Smartphones"
+                4. For "TVs", "television" → use category="Televisions" or "Smart Televisions"
+                5. For "headphones", "earphones", "earbuds" → use category="Headphones" or related category
+
+                BRAND FILTERING (CRITICAL):
+                6. When user mentions a BRAND (Samsung, Apple, Sony, OnePlus, etc.), ALWAYS use the brand parameter.
+                7. Do NOT put the brand name in the query parameter - use the brand parameter instead.
+                8. The brand parameter filters results to ONLY show products from that brand.
 
                 EXAMPLES:
-                **User:** "Show me Samsung mobile phones" → `searchProducts(query="Samsung mobile phones", category="Smartphones")`
-                **User:** "Find Sony TVs under ₹50000" → `searchProducts(query="Sony TVs", category="Televisions", maxPrice=50000)`
+                **User:** "Show me Samsung mobile phones" → `searchProducts(query="mobile phones", category="Smartphones", brand="Samsung")`
+                **User:** "Samsung phones under 50000" → `searchProducts(category="Smartphones", brand="Samsung", maxPrice=50000)`
+                **User:** "Find Sony TVs under ₹50000" → `searchProducts(category="Televisions", brand="Sony", maxPrice=50000)`
+                **User:** "Apple laptops" → `searchProducts(category="Laptops", brand="Apple")`
                 **User:** "Recommend laptops for coding" → `searchProducts(query="laptops for coding", category="Laptops")`
                 **User:** "Compare iPhone 15 and Samsung S24" → `compareProducts(productNames=["iPhone 15", "Samsung S24"])`
                 """);

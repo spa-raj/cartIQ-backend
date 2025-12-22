@@ -72,17 +72,19 @@ public class ProductToolService {
      * 1. Run Vector Search (semantic) → get candidates
      * 2. Run PostgreSQL FTS (keyword) → get candidates
      * 3. Combine and deduplicate candidates
-     * 4. Use Cross-Encoder Reranker to select top-N most relevant results
+     * 4. Apply brand filter if specified
+     * 5. Use Cross-Encoder Reranker to select top-N most relevant results
      */
     public List<ProductDTO> executeSearchProducts(
             String query,
             String category,
+            String brand,
             Double minPrice,
             Double maxPrice,
             Double minRating) {
 
-        log.info("Executing searchProducts: query={}, category={}, minPrice={}, maxPrice={}, minRating={}",
-                query, category, minPrice, maxPrice, minRating);
+        log.info("Executing searchProducts: query={}, category={}, brand={}, minPrice={}, maxPrice={}, minRating={}",
+                query, category, brand, minPrice, maxPrice, minRating);
 
         // If no query, just use FTS/category search
         if (query == null || query.isBlank()) {
@@ -142,7 +144,25 @@ public class ProductToolService {
         log.info("Hybrid search: {} category + {} vector + {} FTS = {} unique candidates",
                 categoryResults.size(), vectorResults.size(), ftsResults.size(), combinedResults.size());
 
-        // 4. Apply category BOOSTING (not filtering) - products matching category come first
+        // 4. Apply BRAND FILTER - strict filtering, only show products from specified brand
+        if (brand != null && !brand.isBlank()) {
+            String brandLower = brand.toLowerCase().trim();
+            List<ProductDTO> brandFiltered = combinedResults.stream()
+                    .filter(p -> p.getBrand() != null &&
+                            p.getBrand().toLowerCase().contains(brandLower))
+                    .toList();
+
+            log.info("Brand filter '{}': {} -> {} products", brand, combinedResults.size(), brandFiltered.size());
+
+            // If brand filter returns results, use them; otherwise keep original for fallback
+            if (!brandFiltered.isEmpty()) {
+                combinedResults = new ArrayList<>(brandFiltered);
+            } else {
+                log.warn("Brand '{}' not found in results, keeping all {} products", brand, combinedResults.size());
+            }
+        }
+
+        // 5. Apply category BOOSTING (not filtering) - products matching category come first
         if (category != null && !category.isBlank()) {
             Set<String> allowedCategories = categoryService.expandCategoryNamesWithDescendants(List.of(category));
 
