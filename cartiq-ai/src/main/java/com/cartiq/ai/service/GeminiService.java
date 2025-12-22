@@ -514,11 +514,21 @@ public class GeminiService {
                 **User:** "Find laptops under ₹50000"
                 **Tool Call:** `searchProducts(query="laptops", maxPrice=50000)`
 
-                **User:** "Recommend me some good running shoes from Nike"
-                **Tool Call:** `getProductsByBrand(brand="Nike")`
+                **User:** "Recommend me Samsung smartphones under ₹50000"
+                **Tool Call:** `searchProducts(query="Samsung smartphones", category="Smartphones", maxPrice=50000)`
+
+                **User:** "Show me Nike running shoes"
+                **Tool Call:** `searchProducts(query="Nike running shoes", category="Running Shoes")`
+
+                **User:** "Find Sony headphones under ₹10000"
+                **Tool Call:** `searchProducts(query="Sony headphones", category="On-Ear", maxPrice=10000)`
 
                 **User:** "Compare the Samsung Galaxy S23 and iPhone 15"
                 **Tool Call:** `compareProducts(productNames=["Samsung Galaxy S23", "iPhone 15"])`
+
+                IMPORTANT: When user mentions a brand AND a product type (like "Samsung smartphones" or "Nike shoes"),
+                always use searchProducts with both query and category parameters, NOT getProductsByBrand.
+                Only use getProductsByBrand when user asks for ALL products from a brand without specifying a type.
                 """);
 
         prompt.append("\n\n");
