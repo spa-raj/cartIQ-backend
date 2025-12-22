@@ -242,6 +242,22 @@ public class SuggestionsService {
                 filters.put("maxPrice", maxBudget);
             }
 
+            // Build allowed categories from AI search categories + recent categories
+            // This ensures vector search results are relevant to what the user is interested in
+            Set<String> allowedCategories = new HashSet<>();
+            if (profile.getAiSearchCategories() != null) {
+                profile.getAiSearchCategories().stream()
+                        .filter(c -> c != null && !c.isBlank())
+                        .forEach(allowedCategories::add);
+            }
+            if (profile.getRecentCategories() != null) {
+                profile.getRecentCategories().stream()
+                        .filter(c -> c != null && !c.isBlank())
+                        .forEach(allowedCategories::add);
+            }
+
+            log.debug("AI intent: filtering by categories: {}", allowedCategories);
+
             List<SuggestedProduct> allResults = new ArrayList<>();
             Set<UUID> seenProductIds = new HashSet<>();
 
@@ -258,11 +274,12 @@ public class SuggestionsService {
                 for (String query : aiQueries) {
                     if (allResults.size() >= limit) break;
 
-                    int queryLimit = Math.max(3, (limit - allResults.size()));
+                    // Request more results since we'll filter by category
+                    int queryLimit = Math.max(10, (limit - allResults.size()) * 3);
                     List<SearchResult> results = vectorSearchService.searchWithExpansion(query, queryLimit, filters, 2);
 
                     addSearchResultsToSuggestions(results, allResults, seenProductIds, limit,
-                            "ai_intent", truncateContext(query, 40));
+                            "ai_intent", truncateContext(query, 40), allowedCategories);
                 }
             }
 
@@ -279,34 +296,17 @@ public class SuggestionsService {
                 for (String query : searchQueries) {
                     if (allResults.size() >= limit) break;
 
-                    int queryLimit = Math.max(2, (limit - allResults.size()));
+                    // Request more results since we'll filter by category
+                    int queryLimit = Math.max(10, (limit - allResults.size()) * 3);
                     List<SearchResult> results = vectorSearchService.search(query, queryLimit, filters);
 
                     addSearchResultsToSuggestions(results, allResults, seenProductIds, limit,
-                            "ai_intent", truncateContext(query, 30));
+                            "ai_intent", truncateContext(query, 30), allowedCategories);
                 }
             }
 
-            // Priority 3: Fall back to categories if still need more results
-            if (allResults.size() < limit) {
-                List<String> fallbackCategories = getCombinedCategories(profile);
-
-                if (!fallbackCategories.isEmpty()) {
-                    log.info("AI intent: using fallback categories: {}", fallbackCategories);
-
-                    for (String category : fallbackCategories) {
-                        if (allResults.size() >= limit) break;
-
-                        int categoryLimit = Math.max(2, (limit - allResults.size()));
-                        List<SearchResult> results = vectorSearchService.search(category, categoryLimit, filters);
-
-                        addSearchResultsToSuggestions(results, allResults, seenProductIds, limit,
-                                "ai_intent", category);
-                    }
-                }
-            }
-
-            log.debug("AI intent: collected {} products total", allResults.size());
+            log.debug("AI intent: collected {} products (filtered by {} categories)",
+                    allResults.size(), allowedCategories.size());
             return allResults;
 
         } catch (Exception e) {
@@ -324,6 +324,19 @@ public class SuggestionsService {
                                                 int limit,
                                                 String strategy,
                                                 String context) {
+        addSearchResultsToSuggestions(results, allResults, seenProductIds, limit, strategy, context, null);
+    }
+
+    /**
+     * Helper: Add search results to suggestions list, with optional category filtering.
+     */
+    private void addSearchResultsToSuggestions(List<SearchResult> results,
+                                                List<SuggestedProduct> allResults,
+                                                Set<UUID> seenProductIds,
+                                                int limit,
+                                                String strategy,
+                                                String context,
+                                                Set<String> allowedCategories) {
         List<UUID> productIds = results.stream()
                 .map(r -> UUID.fromString(r.getProductId()))
                 .filter(id -> !seenProductIds.contains(id))
@@ -335,6 +348,15 @@ public class SuggestionsService {
 
         for (ProductDTO product : products) {
             if (allResults.size() >= limit) break;
+
+            // Filter by allowed categories if specified
+            if (allowedCategories != null && !allowedCategories.isEmpty()) {
+                String productCategory = product.getCategoryName();
+                if (productCategory == null || !allowedCategories.contains(productCategory)) {
+                    continue; // Skip products not in allowed categories
+                }
+            }
+
             if (seenProductIds.add(product.getId())) {
                 allResults.add(SuggestedProduct.fromStrategy(product, strategy, context));
             }
