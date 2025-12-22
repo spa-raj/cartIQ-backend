@@ -89,18 +89,19 @@ public class ProductToolService {
             return executeFtsSearch(query, category, minPrice, maxPrice, minRating);
         }
 
-        // HYBRID SEARCH: Run both Vector Search and FTS
+        // HYBRID SEARCH: Run both Vector Search and FTS WITHOUT category filter
+        // Category is used for BOOSTING, not filtering - this ensures semantic matches aren't excluded
         List<ProductDTO> vectorResults = List.of();
         List<ProductDTO> ftsResults = List.of();
 
-        // 1. Vector Search (semantic)
+        // 1. Vector Search (semantic) - NO category filter, let embeddings find relevant products
         if (vectorSearchService.isAvailable()) {
-            vectorResults = executeVectorSearch(query, category, minPrice, maxPrice, minRating);
+            vectorResults = executeVectorSearch(query, null, minPrice, maxPrice, minRating);
             log.debug("Vector search returned {} candidates", vectorResults.size());
         }
 
-        // 2. FTS Search (keyword)
-        ftsResults = executeFtsSearchWithLimit(query, category, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
+        // 2. FTS Search (keyword) - NO category filter
+        ftsResults = executeFtsSearchWithLimit(query, null, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
         log.debug("FTS search returned {} candidates", ftsResults.size());
 
         // 3. Combine and deduplicate
@@ -120,27 +121,33 @@ public class ProductToolService {
         log.info("Hybrid search: {} vector + {} FTS = {} unique candidates",
                 vectorResults.size(), ftsResults.size(), combinedResults.size());
 
-        // 4. Apply category filter if specified (post-filter since FTS doesn't support category+query)
+        // 4. Apply category BOOSTING (not filtering) - products matching category come first
         if (category != null && !category.isBlank()) {
-            // Use fuzzy matching to expand category names and include descendants
-            // AI provides the category name from the available list, fuzzy matching handles variations
             Set<String> allowedCategories = categoryService.expandCategoryNamesWithDescendants(List.of(category));
 
             if (!allowedCategories.isEmpty()) {
-                Set<String> finalAllowedCategories = allowedCategories;
-                List<ProductDTO> filtered = combinedResults.stream()
-                        .filter(p -> p.getCategoryName() != null &&
-                                finalAllowedCategories.contains(p.getCategoryName()))
-                        .toList();
+                // Partition: matching categories first, then others
+                List<ProductDTO> matchingCategory = new ArrayList<>();
+                List<ProductDTO> otherProducts = new ArrayList<>();
 
-                log.info("Category filter '{}': {} -> {} products (allowed categories: {})",
-                        category, combinedResults.size(), filtered.size(), allowedCategories);
+                for (ProductDTO product : combinedResults) {
+                    if (product.getCategoryName() != null && allowedCategories.contains(product.getCategoryName())) {
+                        matchingCategory.add(product);
+                    } else {
+                        otherProducts.add(product);
+                    }
+                }
 
-                combinedResults = new ArrayList<>(filtered);
+                // Combine: category matches first, then others as fallback
+                List<ProductDTO> boostedResults = new ArrayList<>(matchingCategory);
+                boostedResults.addAll(otherProducts);
+
+                log.info("Category boost '{}': {} matching + {} others (allowed: {})",
+                        category, matchingCategory.size(), otherProducts.size(), allowedCategories);
+
+                combinedResults = boostedResults;
             } else {
-                // Category specified but no matching categories found - don't return random products
-                log.warn("Category '{}' not found in database, returning empty results", category);
-                return List.of();
+                log.warn("Category '{}' not found, using semantic ranking only", category);
             }
         }
 
@@ -154,7 +161,7 @@ public class ProductToolService {
             return combinedResults.subList(0, Math.min(DEFAULT_PAGE_SIZE, combinedResults.size()));
         }
 
-        // 5. Rerank using Cross-Encoder
+        // 5. Rerank using Cross-Encoder (will consider semantic relevance)
         return rerankResults(query, combinedResults);
     }
 
