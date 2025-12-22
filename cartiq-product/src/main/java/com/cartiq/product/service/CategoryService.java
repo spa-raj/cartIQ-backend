@@ -195,20 +195,27 @@ public class CategoryService {
             Optional<Category> exactMatch = categoryRepository.findByName(categoryName);
 
             if (exactMatch.isPresent()) {
+                log.info("CATEGORY EXPANSION: Exact match found for '{}' -> path='{}'",
+                        categoryName, exactMatch.get().getPath());
                 expandCategory(exactMatch.get(), expanded);
             } else if (categoryName.length() >= 4) {
                 // Try fuzzy match only for terms >= 4 chars to avoid overly broad matches
-                // (e.g., "art" would match "Cartridges", "Artificial Flowers", etc.)
                 List<Category> fuzzyMatches = categoryRepository.findByNameContainingIgnoreCase(categoryName);
+                log.info("CATEGORY EXPANSION: No exact match for '{}', found {} fuzzy matches: {}",
+                        categoryName, fuzzyMatches.size(),
+                        fuzzyMatches.stream().map(Category::getName).limit(5).toList());
                 // Limit to first 3 matches to avoid polluting with too many unrelated categories
                 fuzzyMatches.stream().limit(3).forEach(match -> {
                     expanded.add(match.getName());
                     expandCategory(match, expanded);
                 });
+            } else {
+                log.warn("CATEGORY EXPANSION: No match found for '{}' (too short for fuzzy match)", categoryName);
             }
         }
 
-        log.debug("Expanded {} categories to {} (with descendants)", categoryNames.size(), expanded.size());
+        log.info("CATEGORY EXPANSION RESULT: {} input -> {} output categories: {}",
+                categoryNames, expanded.size(), expanded);
         return expanded;
     }
 
