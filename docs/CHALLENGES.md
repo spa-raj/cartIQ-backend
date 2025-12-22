@@ -186,6 +186,167 @@ if (filteredProducts.isEmpty()) {
 
 ---
 
+## 6. AI Chat Returning Wrong Products for Category Queries
+
+**Date:** December 2024
+
+### Problem
+When users asked the AI chatbot for specific product categories, it returned completely irrelevant products:
+- Query: "Recommend me Samsung mobile phones"
+- Results: iPhones, Samsung TVs, desk lamps, floor cleaners, chips
+
+### Root Cause Analysis
+
+**Multiple issues contributed to this problem:**
+
+#### Issue 1: FTS Index Missing Category Name
+The PostgreSQL full-text search `search_vector` column only included:
+```sql
+to_tsvector('english', name || ' ' || description || ' ' || brand)
+```
+
+When searching for "Samsung smartphones", the word "smartphones" wasn't in the search vector, so FTS returned 0 results or irrelevant matches.
+
+#### Issue 2: Vector Search Semantic Ambiguity
+Vector search matched "Samsung" strongly but didn't distinguish between product types. "Samsung Galaxy S24" (phone) and "Samsung 55-inch TV" both contain "Samsung" with high semantic similarity.
+
+#### Issue 3: Category Filter Too Aggressive
+Initial fix attempted to filter results by category, but when category filter found 0 matches (due to naming mismatches like "Smartphones" vs "mobile phones"), it returned empty or fell back to unfiltered results.
+
+#### Issue 4: Embedding Text Format
+Product embeddings placed category at the end with less semantic weight:
+```
+"Samsung Galaxy S24. 256GB storage... Brand: Samsung. Category: Smartphones."
+```
+The category "Smartphones" didn't match queries like "mobile phones" semantically.
+
+### Solution
+
+**1. Added Category to FTS Index** (`db/migrations/V002__add_category_to_fts.sql`)
+
+Updated the `search_vector` trigger to include category name with weighted search:
+```sql
+CREATE OR REPLACE FUNCTION products_search_vector_trigger() RETURNS trigger AS $$
+DECLARE
+    category_name TEXT;
+BEGIN
+    SELECT c.name INTO category_name FROM categories c WHERE c.id = NEW.category_id;
+
+    NEW.search_vector :=
+        setweight(to_tsvector('english', COALESCE(NEW.name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(category_name, '')), 'A') ||
+        setweight(to_tsvector('english', COALESCE(NEW.brand, '')), 'B') ||
+        setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'C');
+    RETURN NEW;
+END
+$$ LANGUAGE plpgsql;
+```
+
+**2. Improved Embedding Text with Category Synonyms** (`EmbeddingService.java`)
+
+Moved category to the start of embedding text and added synonyms:
+```java
+public String buildProductEmbeddingText(String name, String description, String brand, String categoryName) {
+    StringBuilder sb = new StringBuilder();
+
+    // Start with category and synonyms for stronger semantic matching
+    if (categoryName != null && !categoryName.isBlank()) {
+        sb.append("Category: ").append(categoryName);
+        String synonyms = getCategorySynonyms(categoryName);
+        if (!synonyms.isEmpty()) {
+            sb.append(" (").append(synonyms).append(")");
+        }
+        sb.append(". ");
+    }
+    // ... rest of the text
+}
+
+private String getCategorySynonyms(String categoryName) {
+    String lower = categoryName.toLowerCase();
+    if (lower.contains("smartphone") || lower.equals("mobiles")) {
+        return "mobile phones, cell phones, handsets, cellular phones";
+    }
+    if (lower.contains("television") || lower.equals("tvs")) {
+        return "TVs, TV sets, smart TVs, LED TV, OLED TV";
+    }
+    // ... more mappings
+}
+```
+
+**New embedding text format:**
+```
+"Category: Smartphones (mobile phones, cell phones, handsets). Samsung Galaxy S24. Brand: Samsung. 256GB storage..."
+```
+
+**3. Category Boosting Instead of Filtering** (`ProductToolService.java`)
+
+Changed from strict filtering to boosting - category matches come first but don't exclude other results:
+```java
+// 1. Vector Search (semantic) - NO category filter
+vectorResults = executeVectorSearch(query, null, minPrice, maxPrice, minRating);
+
+// 2. FTS Search (keyword) - NO category filter
+ftsResults = executeFtsSearch(query, null, minPrice, maxPrice, minRating);
+
+// 3. Category-specific search (ensure target category products are included)
+if (category != null) {
+    categoryResults = productService.getProductsByCategoryWithFilters(categoryId, ...);
+}
+
+// 4. Combine with category results first (boosting)
+Map<UUID, ProductDTO> combined = new LinkedHashMap<>();
+for (ProductDTO p : categoryResults) combined.put(p.getId(), p);  // First
+for (ProductDTO p : vectorResults) combined.putIfAbsent(p.getId(), p);
+for (ProductDTO p : ftsResults) combined.putIfAbsent(p.getId(), p);
+```
+
+**4. AI-Powered Category Selection** (`GeminiService.java`)
+
+Added all available categories to the AI system prompt so Gemini can select the correct category name:
+```java
+private String getCategoryListForPrompt() {
+    List<CategoryDTO> categories = categoryService.getAllCategories();
+    return categories.stream()
+        .map(CategoryDTO::getName)
+        .distinct()
+        .sorted()
+        .collect(Collectors.joining(", "));
+}
+```
+
+System prompt now includes:
+```
+AVAILABLE CATEGORIES: Smartphones, Televisions, Laptops, Headphones, ...
+
+CATEGORY SELECTION RULES:
+- Use EXACT category names from the list above
+- "mobile phones" → use "Smartphones"
+- "TVs" → use "Televisions"
+```
+
+### Deployment Steps
+
+1. **Apply FTS migration:**
+   ```bash
+   psql -h <host> -U <user> -d cartiq -f db/migrations/V002__add_category_to_fts.sql
+   ```
+
+2. **Deploy code changes** (new embedding text format)
+
+3. **Re-index vector search** (to regenerate embeddings with synonyms):
+   ```bash
+   curl -X POST "https://<api>/api/internal/indexing/batch/start" \
+     -H "X-Internal-Api-Key: <key>"
+   ```
+
+### Result
+After applying all fixes:
+- **FTS**: "Samsung smartphones" matches products in "Smartphones" category
+- **Vector Search**: "mobile phones" semantically matches embeddings containing "mobile phones, cell phones"
+- **Category boost**: Even if vector/FTS return some wrong results, category-specific products appear first
+
+---
+
 ## Key Learnings
 
 1. **Don't trust inferred data over raw data** - Using actual search queries is more reliable than categories inferred from search results
@@ -197,3 +358,11 @@ if (filteredProducts.isEmpty()) {
 4. **Hierarchical data needs special handling** - Parent-child relationships require recursive or path-based queries
 
 5. **Vector search needs guardrails** - Semantic similarity should be constrained by categorical relevance for "similar products" features
+
+6. **FTS indexes must include all searchable fields** - If users search by category, category name must be in the search vector
+
+7. **Synonyms improve semantic search** - Adding "mobile phones" to "Smartphones" embeddings helps match varied user queries
+
+8. **Boost, don't filter** - When search relevance is uncertain, boost preferred results to the top rather than filtering out potentially relevant items
+
+9. **Give AI the vocabulary** - Provide LLMs with exact category names to prevent mismatches between user language and database values

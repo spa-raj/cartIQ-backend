@@ -89,10 +89,11 @@ public class ProductToolService {
             return executeFtsSearch(query, category, minPrice, maxPrice, minRating);
         }
 
-        // HYBRID SEARCH: Run both Vector Search and FTS WITHOUT category filter
-        // Category is used for BOOSTING, not filtering - this ensures semantic matches aren't excluded
+        // HYBRID SEARCH: Vector + FTS + Category-specific fallback
+        // Category is used for BOOSTING and as a fallback source
         List<ProductDTO> vectorResults = List.of();
         List<ProductDTO> ftsResults = List.of();
+        List<ProductDTO> categoryResults = List.of();
 
         // 1. Vector Search (semantic) - NO category filter, let embeddings find relevant products
         if (vectorSearchService.isAvailable()) {
@@ -104,12 +105,32 @@ public class ProductToolService {
         ftsResults = executeFtsSearchWithLimit(query, null, minPrice, maxPrice, minRating, HYBRID_CANDIDATES);
         log.debug("FTS search returned {} candidates", ftsResults.size());
 
-        // 3. Combine and deduplicate
+        // 3. Category-specific search (fallback to ensure we have products from target category)
+        if (category != null && !category.isBlank()) {
+            UUID categoryId = findCategoryIdByName(category);
+            if (categoryId != null) {
+                categoryResults = productService.getProductsByCategoryWithFilters(
+                        categoryId,
+                        minPrice != null ? BigDecimal.valueOf(minPrice) : null,
+                        maxPrice != null ? BigDecimal.valueOf(maxPrice) : null,
+                        minRating != null ? BigDecimal.valueOf(minRating) : null,
+                        PageRequest.of(0, HYBRID_CANDIDATES)
+                ).getContent();
+                log.debug("Category search returned {} candidates", categoryResults.size());
+            }
+        }
+
+        // 4. Combine and deduplicate (category results first for relevance)
         Map<UUID, ProductDTO> combinedMap = new LinkedHashMap<>();
 
-        // Add vector results first (they have semantic relevance)
-        for (ProductDTO product : vectorResults) {
+        // Add category results first (most relevant to user's intent)
+        for (ProductDTO product : categoryResults) {
             combinedMap.put(product.getId(), product);
+        }
+
+        // Add vector results (semantic relevance)
+        for (ProductDTO product : vectorResults) {
+            combinedMap.putIfAbsent(product.getId(), product);
         }
 
         // Add FTS results (keyword matches)
@@ -118,8 +139,8 @@ public class ProductToolService {
         }
 
         List<ProductDTO> combinedResults = new ArrayList<>(combinedMap.values());
-        log.info("Hybrid search: {} vector + {} FTS = {} unique candidates",
-                vectorResults.size(), ftsResults.size(), combinedResults.size());
+        log.info("Hybrid search: {} category + {} vector + {} FTS = {} unique candidates",
+                categoryResults.size(), vectorResults.size(), ftsResults.size(), combinedResults.size());
 
         // 4. Apply category BOOSTING (not filtering) - products matching category come first
         if (category != null && !category.isBlank()) {

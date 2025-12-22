@@ -226,6 +226,7 @@ public class EmbeddingService {
     /**
      * Build embedding text for a product.
      * Combines name, description, brand, and category for comprehensive embedding.
+     * Category is placed at the start with synonyms for better semantic matching.
      *
      * @param name Product name
      * @param description Product description
@@ -236,24 +237,90 @@ public class EmbeddingService {
     public String buildProductEmbeddingText(String name, String description, String brand, String categoryName) {
         StringBuilder sb = new StringBuilder();
 
+        // Start with category and synonyms for stronger semantic matching
+        if (categoryName != null && !categoryName.isBlank()) {
+            sb.append("Category: ").append(categoryName);
+            String synonyms = getCategorySynonyms(categoryName);
+            if (!synonyms.isEmpty()) {
+                sb.append(" (").append(synonyms).append(")");
+            }
+            sb.append(". ");
+        }
+
         if (name != null && !name.isBlank()) {
             sb.append(name).append(". ");
-        }
-        if (description != null && !description.isBlank()) {
-            // Truncate long descriptions to stay within token limits
-            String truncated = description.length() > 1000
-                    ? description.substring(0, 1000) + "..."
-                    : description;
-            sb.append(truncated).append(" ");
         }
         if (brand != null && !brand.isBlank()) {
             sb.append("Brand: ").append(brand).append(". ");
         }
-        if (categoryName != null && !categoryName.isBlank()) {
-            sb.append("Category: ").append(categoryName).append(".");
+        if (description != null && !description.isBlank()) {
+            // Truncate long descriptions to stay within token limits
+            String truncated = description.length() > 800
+                    ? description.substring(0, 800) + "..."
+                    : description;
+            sb.append(truncated);
         }
 
         return sb.toString().trim();
+    }
+
+    /**
+     * Get synonyms for common category names to improve semantic matching.
+     * E.g., "Smartphones" -> "mobile phones, cell phones, handsets"
+     */
+    private String getCategorySynonyms(String categoryName) {
+        if (categoryName == null) return "";
+
+        String lower = categoryName.toLowerCase();
+
+        // Common category synonyms for better search matching
+        if (lower.contains("smartphone") || lower.equals("mobiles")) {
+            return "mobile phones, cell phones, handsets, cellular phones";
+        }
+        if (lower.contains("television") || lower.equals("tvs")) {
+            return "TVs, TV sets, smart TVs, LED TV, OLED TV";
+        }
+        if (lower.contains("laptop")) {
+            return "notebooks, portable computers, ultrabooks";
+        }
+        if (lower.contains("headphone") || lower.contains("earphone")) {
+            return "earbuds, earphones, headsets, audio accessories";
+        }
+        if (lower.contains("tablet")) {
+            return "iPad, Android tablet, tab, portable tablet";
+        }
+        if (lower.contains("camera")) {
+            return "DSLR, mirrorless, digital camera, photography";
+        }
+        if (lower.contains("watch") && lower.contains("smart")) {
+            return "fitness tracker, wearable, smartwatch";
+        }
+        if (lower.contains("refrigerator") || lower.contains("fridge")) {
+            return "fridge, freezer, refrigerator, cooling appliance";
+        }
+        if (lower.contains("washing machine")) {
+            return "washer, laundry machine, clothes washer";
+        }
+        if (lower.contains("air conditioner") || lower.equals("acs")) {
+            return "AC, cooling system, air cooler, split AC";
+        }
+        if (lower.contains("kurta") || lower.contains("kurti")) {
+            return "Indian wear, ethnic wear, traditional dress";
+        }
+        if (lower.contains("saree") || lower.contains("sari")) {
+            return "traditional wear, Indian dress, ethnic saree";
+        }
+        if (lower.contains("t-shirt") || lower.contains("tshirt")) {
+            return "tee, casual wear, top";
+        }
+        if (lower.contains("jeans")) {
+            return "denim, pants, trousers";
+        }
+        if (lower.contains("sneaker") || lower.contains("sports shoe")) {
+            return "athletic shoes, running shoes, trainers";
+        }
+
+        return "";
     }
 
     /**
