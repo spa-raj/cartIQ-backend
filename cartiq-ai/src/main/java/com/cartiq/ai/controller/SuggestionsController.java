@@ -36,6 +36,7 @@ public class SuggestionsController {
             @RequestHeader(value = "X-User-Id", required = false) String userId,
             @RequestParam(defaultValue = "12") int limit) {
 
+        long startTime = System.currentTimeMillis();
         log.info("GET /api/suggestions - userId={}, limit={}", userId, limit);
 
         // Clamp limit to reasonable bounds
@@ -43,8 +44,11 @@ public class SuggestionsController {
 
         SuggestionsResponse response = suggestionsService.getSuggestions(userId, limit);
 
-        log.info("Returning {} suggestions for userId={}, personalized={}",
-                response.getTotalCount(), userId, response.isPersonalized());
+        long processingTimeMs = System.currentTimeMillis() - startTime;
+        response.setProcessingTimeMs(processingTimeMs);
+
+        log.info("Returning {} suggestions for userId={}, personalized={}, processingTimeMs={}",
+                response.getTotalCount(), userId, response.isPersonalized(), processingTimeMs);
 
         return ResponseEntity.ok(response);
     }

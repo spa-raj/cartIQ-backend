@@ -34,4 +34,7 @@ public class SuggestionsResponse {
 
     /** Timestamp when user profile was last updated (null if not personalized) */
     private String lastUpdated;
+
+    /** Processing time in milliseconds */
+    private Long processingTimeMs;
 }
