@@ -44,9 +44,7 @@ All internal debug endpoints require the `X-Internal-Api-Key` header.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/internal/debug/embeddings/stats` | GET | Get embedding cache statistics |
-| `/api/internal/debug/embeddings/products` | GET | List all cached product embeddings |
 | `/api/internal/debug/embeddings/queries` | GET | List all cached query embeddings |
-| `/api/internal/debug/embeddings/product/{productId}` | GET | Get specific product embedding |
 | `/api/internal/debug/embeddings/query/{hashCode}` | GET | Get specific query embedding |
 
 ---
@@ -188,13 +186,15 @@ The cached user profile contains aggregated data from Flink SQL processing:
 
 # Embedding Cache Endpoints
 
-These endpoints allow you to inspect the embedding cache used for vector search.
+These endpoints allow you to inspect the query embedding cache used for vector search.
+
+> **Note:** Only **query embeddings** are cached. Product embeddings are pre-computed during batch indexing and stored directly in Vertex AI Vector Search index (not in Redis).
 
 ---
 
 ## 3. Get Embedding Cache Statistics
 
-Get an overview of cached embeddings including counts and sample keys.
+Get an overview of cached query embeddings including counts and sample keys.
 
 ### Request
 
@@ -207,15 +207,6 @@ curl -X GET "$BASE_URL/api/internal/debug/embeddings/stats" \
 
 ```json
 {
-  "productEmbeddings": {
-    "prefix": "embedding:",
-    "count": 150,
-    "sampleKeys": [
-      "embedding:prod-001",
-      "embedding:prod-002",
-      "embedding:prod-003"
-    ]
-  },
   "queryEmbeddings": {
     "prefix": "query_embedding:",
     "count": 25,
@@ -224,53 +215,13 @@ curl -X GET "$BASE_URL/api/internal/debug/embeddings/stats" \
       "query_embedding:-987654321"
     ]
   },
-  "totalCachedEmbeddings": 175
+  "totalCachedEmbeddings": 25
 }
 ```
 
 ---
 
-## 4. List Product Embeddings
-
-List all cached product embeddings with their TTL.
-
-### Request
-
-```bash
-curl -X GET "$BASE_URL/api/internal/debug/embeddings/products?limit=10" \
-  -H "X-Internal-Api-Key: $INTERNAL_API_KEY"
-```
-
-### Query Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `limit` | 20 | Maximum number of keys to return |
-
-### Response (200 OK)
-
-```json
-{
-  "count": 150,
-  "showing": 10,
-  "embeddings": [
-    {
-      "key": "embedding:prod-001",
-      "productId": "prod-001",
-      "ttlSeconds": 82800
-    },
-    {
-      "key": "embedding:prod-002",
-      "productId": "prod-002",
-      "ttlSeconds": 79200
-    }
-  ]
-}
-```
-
----
-
-## 5. List Query Embeddings
+## 4. List Query Embeddings
 
 List all cached query embeddings with their TTL.
 
@@ -280,6 +231,12 @@ List all cached query embeddings with their TTL.
 curl -X GET "$BASE_URL/api/internal/debug/embeddings/queries?limit=10" \
   -H "X-Internal-Api-Key: $INTERNAL_API_KEY"
 ```
+
+### Query Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `limit` | 20 | Maximum number of keys to return |
 
 ### Response (200 OK)
 
@@ -304,57 +261,7 @@ curl -X GET "$BASE_URL/api/internal/debug/embeddings/queries?limit=10" \
 
 ---
 
-## 6. Get Product Embedding
-
-Get a specific product embedding by product ID.
-
-### Request
-
-```bash
-# Preview only (first 5 and last 5 values)
-curl -X GET "$BASE_URL/api/internal/debug/embeddings/product/{productId}" \
-  -H "X-Internal-Api-Key: $INTERNAL_API_KEY"
-
-# Include full vector (768 dimensions)
-curl -X GET "$BASE_URL/api/internal/debug/embeddings/product/{productId}?includeVector=true" \
-  -H "X-Internal-Api-Key: $INTERNAL_API_KEY"
-```
-
-### Query Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `includeVector` | false | Include full 768-dimension vector in response |
-
-### Response (200 OK)
-
-```json
-{
-  "productId": "prod-001",
-  "cacheKey": "embedding:prod-001",
-  "dimensions": 768,
-  "ttlSeconds": 82800,
-  "ttlFormatted": "23h 0m 0s",
-  "vectorPreview": {
-    "first5": [0.0234, -0.0156, 0.0789, -0.0234, 0.0567],
-    "last5": [0.0123, -0.0456, 0.0789, -0.0123, 0.0345]
-  }
-}
-```
-
-### Response (404 Not Found)
-
-```json
-{
-  "message": "Product embedding not found in cache",
-  "productId": "non-existent-id",
-  "cacheKey": "embedding:non-existent-id"
-}
-```
-
----
-
-## 7. Get Query Embedding
+## 5. Get Query Embedding
 
 Get a specific query embedding by hash code.
 
@@ -387,17 +294,15 @@ curl -X GET "$BASE_URL/api/internal/debug/embeddings/query/{hashCode}" \
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `cartiq.rag.cache.product-embedding-ttl` | `24h` | TTL for product embeddings |
 | `cartiq.rag.cache.query-embedding-ttl` | `1h` | TTL for query embeddings |
 
-### Cache Key Formats
+### Cache Key Format
 
 | Type | Key Format | Example |
 |------|------------|---------|
-| Product Embedding | `embedding:{productId}` | `embedding:prod-001` |
 | Query Embedding | `query_embedding:{hashCode}` | `query_embedding:123456789` |
 
-> **Note:** Query embeddings use the Java `String.hashCode()` of the query text as the key.
+> **Note:** Query embeddings use the Java `String.hashCode()` of the query text as the key. The same query will always produce the same hash, enabling cache hits on repeated searches.
 
 ---
 
@@ -417,20 +322,20 @@ curl -X GET "$BASE_URL/api/internal/debug/embeddings/query/{hashCode}" \
 
 ### Embedding Cache Issues
 
-#### No embeddings cached
-- Embeddings are cached on-demand when vector search is performed
+#### No query embeddings cached
+- Query embeddings are cached on-demand when vector search is performed
 - Try running a search query in AI chat to generate cached embeddings
 - Check logs for "Redis available - embedding caching enabled" at startup
-
-#### Product embedding not found
-- The product may not have been searched for yet
-- Product embeddings are only cached when used in vector search
-- Batch indexing does NOT cache embeddings (it writes directly to Vector Search index)
 
 #### Query embedding not found
 - Query embeddings use `String.hashCode()` as the key
 - The same query text will always produce the same hash
 - Query embeddings expire after 1 hour (configurable)
+
+#### Why are product embeddings not cached?
+- Product embeddings are pre-computed during batch indexing
+- They are stored directly in Vertex AI Vector Search index
+- Caching them in Redis would be redundant (they're already indexed)
 
 #### Redis not available response
 - Redis connection may not be configured
