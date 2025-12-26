@@ -637,7 +637,75 @@ Returns featured products with **category diversity and randomization**:
 
 ---
 
-### 4.9 Get All Brands
+### 4.9 Get Best of Electronics (Randomized & Price Diverse)
+
+**GET** `{{base_url}}/api/products/best-of-electronics`
+
+Returns randomized electronics products with **price diversity** and **strict category filtering**.
+
+**Key Features:**
+- ✅ Only products from Electronics category and its subcategories
+- ✅ Price diversity: mixes budget (<₹5k), mid-range (₹5k-30k), and premium (>₹30k)
+- ✅ Randomized on each request
+- ✅ Supports pagination for infinite scroll
+
+**Query Parameters:**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `page` | 0 | Page number (0-indexed) |
+| `size` | 8 | Items per page |
+
+**Examples:**
+```
+GET /api/products/best-of-electronics
+GET /api/products/best-of-electronics?page=0&size=8
+GET /api/products/best-of-electronics?page=1&size=8  (infinite scroll - next page)
+```
+
+**Expected Response (200 OK):**
+```json
+{
+    "content": [
+        {
+            "id": "...",
+            "name": "Sony WH-1000XM5",
+            "price": 24990.00,
+            "categoryName": "Over-Ear",
+            "rating": 4.7
+        },
+        {
+            "id": "...",
+            "name": "iPhone 15 Pro",
+            "price": 134900.00,
+            "categoryName": "Smartphones",
+            "rating": 4.8
+        },
+        {
+            "id": "...",
+            "name": "Boat Rockerz 400",
+            "price": 1499.00,
+            "categoryName": "On-Ear",
+            "rating": 4.2
+        }
+    ],
+    "totalElements": 150,
+    "totalPages": 19,
+    "number": 0,
+    "size": 8,
+    "last": false
+}
+```
+
+**Note:** Products are selected using round-robin from three price ranges to ensure variety:
+1. Mid-range (₹5,000 - ₹30,000) - prioritized
+2. Premium (>₹30,000)
+3. Budget (<₹5,000)
+
+**Use Case:** "Best of Electronics" section on homepage with "View All" infinite scroll.
+
+---
+
+### 4.10 Get All Brands
 
 **GET** `{{base_url}}/api/products/brands`
 
@@ -653,7 +721,7 @@ Returns featured products with **category diversity and randomization**:
 
 ---
 
-### 4.10 Get Products by IDs (Batch)
+### 4.11 Get Products by IDs (Batch)
 
 **POST** `{{base_url}}/api/products/batch`
 
@@ -691,7 +759,7 @@ Useful for cart/wishlist where you have product IDs.
 
 ---
 
-### 4.11 Create Product (Admin Only)
+### 4.12 Create Product (Admin Only)
 
 **POST** `{{base_url}}/api/products`
 
@@ -777,7 +845,7 @@ if (pm.response.code === 201) {
 
 ---
 
-### 4.12 Update Product (Admin Only)
+### 4.13 Update Product (Admin Only)
 
 **PUT** `{{base_url}}/api/products/{id}`
 
@@ -823,7 +891,7 @@ All fields are optional - only provided fields are updated.
 
 ---
 
-### 4.13 Update Product Stock (Admin Only)
+### 4.14 Update Product Stock (Admin Only)
 
 **PATCH** `{{base_url}}/api/products/{id}/stock?quantity={delta}`
 
@@ -1126,6 +1194,12 @@ curl -X GET "http://localhost:8082/api/products/price-range?minPrice=100&maxPric
 
 # Get featured products
 curl -X GET "http://localhost:8082/api/products/featured?size=5"
+
+# Get best of electronics (randomized, price diverse)
+curl -X GET "http://localhost:8082/api/products/best-of-electronics?page=0&size=8"
+
+# Get best of electronics - next page (infinite scroll)
+curl -X GET "http://localhost:8082/api/products/best-of-electronics?page=1&size=8"
 
 # Get all brands
 curl -X GET http://localhost:8082/api/products/brands

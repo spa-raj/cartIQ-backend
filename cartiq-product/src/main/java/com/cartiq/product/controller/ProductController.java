@@ -80,6 +80,22 @@ public class ProductController {
         return ResponseEntity.ok(productService.getFeaturedProducts(pageable));
     }
 
+    /**
+     * Get randomized electronics products with varying price ranges.
+     * Returns products strictly from Electronics category hierarchy.
+     * Supports pagination for infinite scroll.
+     *
+     * @param page Page number (0-indexed)
+     * @param size Number of products per page
+     * @return Paginated list of randomized electronics products
+     */
+    @GetMapping("/best-of-electronics")
+    public ResponseEntity<Page<ProductDTO>> getBestOfElectronics(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "8") int size) {
+        return ResponseEntity.ok(productService.getBestOfElectronics(page, size));
+    }
+
     @GetMapping("/brands")
     public ResponseEntity<List<String>> getAllBrands() {
         return ResponseEntity.ok(productService.getAllBrands());

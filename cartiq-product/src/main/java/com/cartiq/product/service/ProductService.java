@@ -12,6 +12,7 @@ import com.cartiq.product.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -363,6 +364,110 @@ public class ProductService {
 
         productRepository.save(product);
         log.info("Product stock updated: id={}, newQuantity={}", id, newQuantity);
+    }
+
+    // ==================== BEST OF ELECTRONICS ====================
+
+    /**
+     * Get randomized electronics products with varying price ranges.
+     * Strictly filters by Electronics category and its subcategories.
+     * Ensures price diversity by mixing budget, mid-range, and premium products.
+     *
+     * @param page Page number (0-indexed)
+     * @param size Number of products per page
+     * @return Paginated list of randomized electronics products
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductDTO> getBestOfElectronics(int page, int size) {
+        // Find Electronics category
+        Optional<Category> electronicsOpt = categoryRepository.findByNameIgnoreCase("Electronics");
+        if (electronicsOpt.isEmpty()) {
+            log.warn("Electronics category not found");
+            return Page.empty(PageRequest.of(page, size));
+        }
+
+        Category electronics = electronicsOpt.get();
+
+        // Get all Electronics subcategory IDs
+        List<UUID> allCategoryIds = new ArrayList<>();
+        allCategoryIds.add(electronics.getId());
+        if (electronics.getPath() != null) {
+            List<UUID> descendantIds = categoryRepository.findDescendantCategoryIds(electronics.getPath());
+            allCategoryIds.addAll(descendantIds);
+        }
+
+        log.debug("Best of Electronics: searching in {} categories", allCategoryIds.size());
+
+        // Fetch more products for randomization and price diversity
+        int fetchSize = Math.min(size * 10, 200);
+        List<Product> allProducts = productRepository.findByCategoryIdInAndStatusActive(
+                allCategoryIds, PageRequest.of(0, fetchSize)).getContent();
+
+        if (allProducts.isEmpty()) {
+            return Page.empty(PageRequest.of(page, size));
+        }
+
+        // Categorize by price range for diversity
+        List<Product> budget = new ArrayList<>();      // < 5000
+        List<Product> midRange = new ArrayList<>();    // 5000-30000
+        List<Product> premium = new ArrayList<>();     // > 30000
+
+        for (Product p : allProducts) {
+            double price = p.getPrice().doubleValue();
+            if (price < 5000) {
+                budget.add(p);
+            } else if (price <= 30000) {
+                midRange.add(p);
+            } else {
+                premium.add(p);
+            }
+        }
+
+        // Shuffle each price range
+        Random random = new Random();
+        Collections.shuffle(budget, random);
+        Collections.shuffle(midRange, random);
+        Collections.shuffle(premium, random);
+
+        // Combine with price diversity: mix from each range
+        List<Product> diverseProducts = new ArrayList<>();
+        int[] indices = {0, 0, 0};
+        List<List<Product>> ranges = List.of(midRange, premium, budget); // Priority order
+
+        // Round-robin from each price range
+        while (diverseProducts.size() < allProducts.size()) {
+            boolean added = false;
+            for (int i = 0; i < ranges.size(); i++) {
+                List<Product> range = ranges.get(i);
+                if (indices[i] < range.size()) {
+                    diverseProducts.add(range.get(indices[i]));
+                    indices[i]++;
+                    added = true;
+                }
+            }
+            if (!added) break; // All ranges exhausted
+        }
+
+        // Calculate pagination
+        int start = page * size;
+        int end = Math.min(start + size, diverseProducts.size());
+
+        if (start >= diverseProducts.size()) {
+            return Page.empty(PageRequest.of(page, size));
+        }
+
+        List<ProductDTO> pageContent = diverseProducts.subList(start, end).stream()
+                .map(ProductDTO::fromEntity)
+                .toList();
+
+        log.debug("Best of Electronics: page={}, size={}, returning {} products (budget={}, mid={}, premium={})",
+                page, size, pageContent.size(), budget.size(), midRange.size(), premium.size());
+
+        return new PageImpl<>(
+                pageContent,
+                PageRequest.of(page, size),
+                diverseProducts.size()
+        );
     }
 
     // ==================== SUGGESTIONS API METHODS ====================
