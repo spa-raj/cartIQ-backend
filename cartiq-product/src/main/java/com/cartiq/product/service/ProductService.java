@@ -470,6 +470,115 @@ public class ProductService {
         );
     }
 
+    // ==================== BEST OF FASHION ====================
+
+    /**
+     * Get randomized fashion products with varying price ranges.
+     * Strictly filters by Clothing & Accessories and Shoes & Handbags categories.
+     * Ensures price diversity by mixing budget, mid-range, and premium products.
+     *
+     * @param page Page number (0-indexed)
+     * @param size Number of products per page
+     * @return Paginated list of randomized fashion products
+     */
+    @Transactional(readOnly = true)
+    public Page<ProductDTO> getBestOfFashion(int page, int size) {
+        // Find Fashion categories
+        List<String> fashionCategoryNames = List.of("Clothing & Accessories", "Shoes & Handbags");
+        List<UUID> allCategoryIds = new ArrayList<>();
+
+        for (String categoryName : fashionCategoryNames) {
+            Optional<Category> categoryOpt = categoryRepository.findByNameIgnoreCase(categoryName);
+            if (categoryOpt.isPresent()) {
+                Category category = categoryOpt.get();
+                allCategoryIds.add(category.getId());
+                // Get all subcategories
+                if (category.getPath() != null) {
+                    List<UUID> descendantIds = categoryRepository.findDescendantCategoryIds(category.getPath());
+                    allCategoryIds.addAll(descendantIds);
+                }
+            }
+        }
+
+        if (allCategoryIds.isEmpty()) {
+            log.warn("Fashion categories not found");
+            return Page.empty(PageRequest.of(page, size));
+        }
+
+        log.debug("Best of Fashion: searching in {} categories", allCategoryIds.size());
+
+        // Fetch more products for randomization and price diversity
+        int fetchSize = Math.min(size * 10, 200);
+        List<Product> allProducts = productRepository.findByCategoryIdInAndStatusActive(
+                allCategoryIds, PageRequest.of(0, fetchSize)).getContent();
+
+        if (allProducts.isEmpty()) {
+            return Page.empty(PageRequest.of(page, size));
+        }
+
+        // Categorize by price range for diversity (fashion-appropriate ranges)
+        List<Product> budget = new ArrayList<>();      // < 1000
+        List<Product> midRange = new ArrayList<>();    // 1000-5000
+        List<Product> premium = new ArrayList<>();     // > 5000
+
+        for (Product p : allProducts) {
+            double price = p.getPrice().doubleValue();
+            if (price < 1000) {
+                budget.add(p);
+            } else if (price <= 5000) {
+                midRange.add(p);
+            } else {
+                premium.add(p);
+            }
+        }
+
+        // Shuffle each price range
+        Random random = new Random();
+        Collections.shuffle(budget, random);
+        Collections.shuffle(midRange, random);
+        Collections.shuffle(premium, random);
+
+        // Combine with price diversity: mix from each range
+        List<Product> diverseProducts = new ArrayList<>();
+        int[] indices = {0, 0, 0};
+        List<List<Product>> ranges = List.of(midRange, premium, budget); // Priority order
+
+        // Round-robin from each price range
+        while (diverseProducts.size() < allProducts.size()) {
+            boolean added = false;
+            for (int i = 0; i < ranges.size(); i++) {
+                List<Product> range = ranges.get(i);
+                if (indices[i] < range.size()) {
+                    diverseProducts.add(range.get(indices[i]));
+                    indices[i]++;
+                    added = true;
+                }
+            }
+            if (!added) break; // All ranges exhausted
+        }
+
+        // Calculate pagination
+        int start = page * size;
+        int end = Math.min(start + size, diverseProducts.size());
+
+        if (start >= diverseProducts.size()) {
+            return Page.empty(PageRequest.of(page, size));
+        }
+
+        List<ProductDTO> pageContent = diverseProducts.subList(start, end).stream()
+                .map(ProductDTO::fromEntity)
+                .toList();
+
+        log.debug("Best of Fashion: page={}, size={}, returning {} products (budget={}, mid={}, premium={})",
+                page, size, pageContent.size(), budget.size(), midRange.size(), premium.size());
+
+        return new PageImpl<>(
+                pageContent,
+                PageRequest.of(page, size),
+                diverseProducts.size()
+        );
+    }
+
     // ==================== SUGGESTIONS API METHODS ====================
 
     /**

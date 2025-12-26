@@ -96,6 +96,22 @@ public class ProductController {
         return ResponseEntity.ok(productService.getBestOfElectronics(page, size));
     }
 
+    /**
+     * Get randomized fashion products with varying price ranges.
+     * Returns products from Clothing & Accessories and Shoes & Handbags categories.
+     * Supports pagination for infinite scroll.
+     *
+     * @param page Page number (0-indexed)
+     * @param size Number of products per page
+     * @return Paginated list of randomized fashion products
+     */
+    @GetMapping("/best-of-fashion")
+    public ResponseEntity<Page<ProductDTO>> getBestOfFashion(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "8") int size) {
+        return ResponseEntity.ok(productService.getBestOfFashion(page, size));
+    }
+
     @GetMapping("/brands")
     public ResponseEntity<List<String>> getAllBrands() {
         return ResponseEntity.ok(productService.getAllBrands());

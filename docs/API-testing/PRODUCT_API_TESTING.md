@@ -705,7 +705,75 @@ GET /api/products/best-of-electronics?page=1&size=8  (infinite scroll - next pag
 
 ---
 
-### 4.10 Get All Brands
+### 4.10 Get Best of Fashion (Randomized & Price Diverse)
+
+**GET** `{{base_url}}/api/products/best-of-fashion`
+
+Returns randomized fashion products with **price diversity** and **strict category filtering**.
+
+**Key Features:**
+- ✅ Only products from Clothing & Accessories and Shoes & Handbags categories
+- ✅ Price diversity: mixes budget (<₹1k), mid-range (₹1k-5k), and premium (>₹5k)
+- ✅ Randomized on each request
+- ✅ Supports pagination for infinite scroll
+
+**Query Parameters:**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `page` | 0 | Page number (0-indexed) |
+| `size` | 8 | Items per page |
+
+**Examples:**
+```
+GET /api/products/best-of-fashion
+GET /api/products/best-of-fashion?page=0&size=8
+GET /api/products/best-of-fashion?page=1&size=8  (infinite scroll - next page)
+```
+
+**Expected Response (200 OK):**
+```json
+{
+    "content": [
+        {
+            "id": "...",
+            "name": "Nike Air Max 270",
+            "price": 12995.00,
+            "categoryName": "Running Shoes",
+            "rating": 4.5
+        },
+        {
+            "id": "...",
+            "name": "Levi's 501 Original Jeans",
+            "price": 3499.00,
+            "categoryName": "Jeans",
+            "rating": 4.6
+        },
+        {
+            "id": "...",
+            "name": "Cotton T-Shirt",
+            "price": 599.00,
+            "categoryName": "T-Shirts",
+            "rating": 4.2
+        }
+    ],
+    "totalElements": 200,
+    "totalPages": 25,
+    "number": 0,
+    "size": 8,
+    "last": false
+}
+```
+
+**Note:** Products are selected using round-robin from three price ranges to ensure variety:
+1. Mid-range (₹1,000 - ₹5,000) - prioritized
+2. Premium (>₹5,000)
+3. Budget (<₹1,000)
+
+**Use Case:** "Best of Fashion" section on homepage with "View All" infinite scroll.
+
+---
+
+### 4.11 Get All Brands
 
 **GET** `{{base_url}}/api/products/brands`
 
@@ -721,7 +789,7 @@ GET /api/products/best-of-electronics?page=1&size=8  (infinite scroll - next pag
 
 ---
 
-### 4.11 Get Products by IDs (Batch)
+### 4.12 Get Products by IDs (Batch)
 
 **POST** `{{base_url}}/api/products/batch`
 
@@ -759,7 +827,7 @@ Useful for cart/wishlist where you have product IDs.
 
 ---
 
-### 4.12 Create Product (Admin Only)
+### 4.13 Create Product (Admin Only)
 
 **POST** `{{base_url}}/api/products`
 
@@ -845,7 +913,7 @@ if (pm.response.code === 201) {
 
 ---
 
-### 4.13 Update Product (Admin Only)
+### 4.14 Update Product (Admin Only)
 
 **PUT** `{{base_url}}/api/products/{id}`
 
@@ -891,7 +959,7 @@ All fields are optional - only provided fields are updated.
 
 ---
 
-### 4.14 Update Product Stock (Admin Only)
+### 4.15 Update Product Stock (Admin Only)
 
 **PATCH** `{{base_url}}/api/products/{id}/stock?quantity={delta}`
 
@@ -1200,6 +1268,12 @@ curl -X GET "http://localhost:8082/api/products/best-of-electronics?page=0&size=
 
 # Get best of electronics - next page (infinite scroll)
 curl -X GET "http://localhost:8082/api/products/best-of-electronics?page=1&size=8"
+
+# Get best of fashion (randomized, price diverse)
+curl -X GET "http://localhost:8082/api/products/best-of-fashion?page=0&size=8"
+
+# Get best of fashion - next page (infinite scroll)
+curl -X GET "http://localhost:8082/api/products/best-of-fashion?page=1&size=8"
 
 # Get all brands
 curl -X GET http://localhost:8082/api/products/brands
