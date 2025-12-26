@@ -219,8 +219,10 @@ public class SuggestionsService {
     }
 
     private boolean hasCategories(UserProfile profile) {
-        return profile.getRecentCategories() != null && !profile.getRecentCategories().isEmpty()
-                && !profile.getRecentCategories().stream().allMatch(String::isBlank);
+        // Check all category sources: recent, cart, and AI search
+        return hasValidCategories(profile.getRecentCategories())
+                || hasValidCategories(profile.getCartCategories())
+                || hasValidCategories(profile.getAiSearchCategories());
     }
 
     /**
@@ -391,10 +393,27 @@ public class SuggestionsService {
     }
 
     /**
-     * Helper: Get combined categories with priority ordering.
+     * Helper: Get combined categories with priority ordering (for AI intent filtering).
      * Cart > Recent > AI (based on reliability).
+     * Limited to 4 categories for focused filtering.
      */
     private List<String> getCombinedCategories(UserProfile profile) {
+        return getCombinedCategoriesWithLimit(profile, 4);
+    }
+
+    /**
+     * Helper: Get combined categories for suggestions with more variety.
+     * Includes up to 8 categories to show diverse recommendations.
+     */
+    private List<String> getCombinedCategoriesForSuggestions(UserProfile profile) {
+        return getCombinedCategoriesWithLimit(profile, 8);
+    }
+
+    /**
+     * Helper: Get combined categories with priority ordering and configurable limit.
+     * Cart > Recent > AI (based on reliability).
+     */
+    private List<String> getCombinedCategoriesWithLimit(UserProfile profile, int maxCategories) {
         List<String> combinedCategories = new ArrayList<>();
 
         // Priority 1: Cart categories (strongest - user is ready to buy these)
@@ -404,15 +423,7 @@ public class SuggestionsService {
                     .forEach(combinedCategories::add);
         }
 
-        // Priority 2: Recent categories (strong - user actively browsed these)
-        if (profile.getRecentCategories() != null) {
-            profile.getRecentCategories().stream()
-                    .filter(c -> c != null && !c.isBlank())
-                    .filter(c -> !combinedCategories.contains(c))
-                    .forEach(combinedCategories::add);
-        }
-
-        // Priority 3: AI search categories (may be inaccurate)
+        // Priority 2: AI search categories (explicit intent - user asked for these)
         if (profile.getAiSearchCategories() != null) {
             profile.getAiSearchCategories().stream()
                     .filter(c -> c != null && !c.isBlank())
@@ -420,9 +431,17 @@ public class SuggestionsService {
                     .forEach(combinedCategories::add);
         }
 
+        // Priority 3: Recent categories (browsing behavior)
+        if (profile.getRecentCategories() != null) {
+            profile.getRecentCategories().stream()
+                    .filter(c -> c != null && !c.isBlank())
+                    .filter(c -> !combinedCategories.contains(c))
+                    .forEach(combinedCategories::add);
+        }
+
         return combinedCategories.stream()
                 .distinct()
-                .limit(4)
+                .limit(maxCategories)
                 .toList();
     }
 
@@ -505,13 +524,19 @@ public class SuggestionsService {
      * Strategy 3: Category Products
      * Top-rated products in user's browsed categories, filtered by price preference.
      * Uses round-robin approach to ensure diversity across all categories.
+     *
+     * Categories are combined from multiple sources (priority order):
+     * 1. Cart categories (strongest - user is ready to buy)
+     * 2. Recent browsing categories
+     * 3. AI search categories (explicit intent)
      */
     private List<SuggestedProduct> getCategoryProducts(UserProfile profile, int limit, List<SuggestedProduct> existing) {
         try {
-            List<String> categories = profile.getRecentCategories().stream()
-                    .filter(c -> c != null && !c.isBlank())
-                    .limit(5) // Cap to top 5 categories to avoid too many queries
-                    .toList();
+            // Use combined categories from all sources for maximum variety
+            List<String> categories = getCombinedCategoriesForSuggestions(profile);
+
+            log.debug("Category affinity: using {} categories from combined sources: {}",
+                    categories.size(), categories);
 
             if (categories.isEmpty()) {
                 return List.of();
