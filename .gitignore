@@ -70,8 +70,6 @@ Thumbs.db
 # Spring Boot
 *.pid
 
-# Claude AI
-CLAUDE.md
 
 # GCP config files and credentials
 cartiq-sa-key.json
