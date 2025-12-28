@@ -301,6 +301,7 @@ The personalized "Suggested For You" section appears after the user interacts wi
 - [Order API](./API-testing/ORDER_API_TESTING.md)
 - [Chat API](./API-testing/CHAT_API_TESTING.md)
 - [Suggestions API](./API-testing/SUGGESTIONS_API_TESTING.md)
+- [Events API](./API-testing/EVENTS_API_TESTING.md)
 
 ---
 

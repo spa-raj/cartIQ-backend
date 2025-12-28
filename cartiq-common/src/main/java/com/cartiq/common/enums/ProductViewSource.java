@@ -11,7 +11,8 @@ public enum ProductViewSource {
     CATEGORY,
     DIRECT,
     CART,
-    HOME;
+    HOME,
+    AI_CHAT;
 
     @JsonValue
     public String toJson() {
