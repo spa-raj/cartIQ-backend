@@ -6,6 +6,26 @@ This guide walks through setting up the GCP infrastructure for CartIQ's producti
 
 ---
 
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Enable Required APIs](#1-enable-required-apis)
+3. [Create Service Account](#2-create-service-account)
+4. [Create Secrets in Secret Manager](#3-create-secrets-in-secret-manager)
+5. [Set Up VPC Network](#4-set-up-vpc-network-required-for-vector-search--redis)
+6. [Create Cloud Memorystore Redis Instance](#5-create-cloud-memorystore-redis-instance)
+7. [Create Cloud SQL PostgreSQL Instance](#6-create-cloud-sql-postgresql-instance)
+8. [Create Vertex AI Vector Search Index](#7-create-vertex-ai-vector-search-index)
+9. [Create GCS Bucket for Batch Indexing](#8-create-gcs-bucket-for-batch-indexing)
+10. [Verify Setup](#9-verify-setup)
+11. [Environment Variables Summary](#10-environment-variables-summary)
+12. [Cost Estimates](#11-cost-estimates)
+13. [Cleanup (After Hackathon)](#12-cleanup-after-hackathon)
+14. [Troubleshooting](#troubleshooting)
+15. [Quick Reference](#quick-reference)
+
+---
+
 ## Prerequisites
 
 - GCP Account with billing enabled
@@ -88,36 +108,66 @@ Store sensitive credentials in GCP Secret Manager instead of environment variabl
 
 | Secret Name | Variable | Description |
 |-------------|----------|-------------|
-| `jwt-secret` | JWT_SECRET | JWT signing key |
+| `jwt-secret` | JWT_SECRET | JWT signing key (min 256 bits) |
+| `db-password` | SPRING_DATASOURCE_PASSWORD | PostgreSQL database password |
+| `admin-password` | ADMIN_PASSWORD | Initial admin user password |
+| `internal-api-key` | INTERNAL_API_KEY | API key for internal/batch endpoints |
 | `confluent-api-key` | CONFLUENT_API_KEY | Kafka API key |
 | `confluent-api-secret` | CONFLUENT_API_SECRET | Kafka API secret |
-| `admin-password` | ADMIN_PASSWORD | Admin user password |
+| `confluent-sr-api-key` | CONFLUENT_SR_API_KEY | Schema Registry API key |
+| `confluent-sr-api-secret` | CONFLUENT_SR_API_SECRET | Schema Registry API secret |
 
 ### Create All Secrets
 
 ```bash
-# 1. JWT Secret (generate new secure key)
+# 1. JWT Secret (generate new secure key - 256 bits)
 JWT_SECRET=$(openssl rand -base64 32)
 echo -n "$JWT_SECRET" | gcloud secrets create jwt-secret \
   --data-file=- \
   --replication-policy="automatic"
-echo "Created jwt-secret: $JWT_SECRET"
+echo "Created jwt-secret"
 
-# 2. Confluent API Key (from your Confluent Cloud console)
+# 2. Database Password (will be created in Cloud SQL section, or create now)
+DB_PASSWORD=$(openssl rand -base64 16)
+echo -n "$DB_PASSWORD" | gcloud secrets create db-password \
+  --data-file=- \
+  --replication-policy="automatic"
+echo "Created db-password: $DB_PASSWORD"
+
+# 3. Admin Password (set a secure password - min 8 chars, uppercase, lowercase, digit, special char)
+read -sp "Enter Admin Password: " ADMIN_PASS && echo
+echo -n "$ADMIN_PASS" | gcloud secrets create admin-password \
+  --data-file=- \
+  --replication-policy="automatic"
+
+# 4. Internal API Key (for batch indexing endpoints)
+INTERNAL_KEY=$(openssl rand -base64 32)
+echo -n "$INTERNAL_KEY" | gcloud secrets create internal-api-key \
+  --data-file=- \
+  --replication-policy="automatic"
+echo "Created internal-api-key"
+
+# 5. Confluent API Key (from your Confluent Cloud console)
 read -p "Enter Confluent API Key: " CONFLUENT_KEY
 echo -n "$CONFLUENT_KEY" | gcloud secrets create confluent-api-key \
   --data-file=- \
   --replication-policy="automatic"
 
-# 3. Confluent API Secret (from your Confluent Cloud console)
+# 6. Confluent API Secret (from your Confluent Cloud console)
 read -sp "Enter Confluent API Secret: " CONFLUENT_SECRET && echo
 echo -n "$CONFLUENT_SECRET" | gcloud secrets create confluent-api-secret \
   --data-file=- \
   --replication-policy="automatic"
 
-# 4. Admin Password (set a secure password)
-read -sp "Enter Admin Password (min 8 chars): " ADMIN_PASS && echo
-echo -n "$ADMIN_PASS" | gcloud secrets create admin-password \
+# 7. Schema Registry API Key (from Confluent Cloud > Schema Registry)
+read -p "Enter Schema Registry API Key: " SR_KEY
+echo -n "$SR_KEY" | gcloud secrets create confluent-sr-api-key \
+  --data-file=- \
+  --replication-policy="automatic"
+
+# 8. Schema Registry API Secret
+read -sp "Enter Schema Registry API Secret: " SR_SECRET && echo
+echo -n "$SR_SECRET" | gcloud secrets create confluent-sr-api-secret \
   --data-file=- \
   --replication-policy="automatic"
 
@@ -129,7 +179,9 @@ gcloud secrets list
 
 ```bash
 # Grant access to all secrets
-for SECRET in jwt-secret confluent-api-key confluent-api-secret admin-password; do
+for SECRET in jwt-secret db-password admin-password internal-api-key \
+              confluent-api-key confluent-api-secret \
+              confluent-sr-api-key confluent-sr-api-secret; do
   gcloud secrets add-iam-policy-binding $SECRET \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="roles/secretmanager.secretAccessor"
@@ -965,11 +1017,11 @@ gcloud storage rm -r gs://${BUCKET_NAME}
 gcloud storage rm -r gs://cartiq-indexing-data
 
 # Delete secrets
-gcloud secrets delete jwt-secret --quiet 2>/dev/null || true
-gcloud secrets delete confluent-api-key --quiet 2>/dev/null || true
-gcloud secrets delete confluent-api-secret --quiet 2>/dev/null || true
-gcloud secrets delete admin-password --quiet 2>/dev/null || true
-gcloud secrets delete db-password --quiet 2>/dev/null || true
+for SECRET in jwt-secret db-password admin-password internal-api-key \
+              confluent-api-key confluent-api-secret \
+              confluent-sr-api-key confluent-sr-api-secret; do
+  gcloud secrets delete $SECRET --quiet 2>/dev/null || true
+done
 
 # Delete service account
 gcloud iam service-accounts delete $SA_EMAIL
@@ -1105,4 +1157,4 @@ gcloud projects get-iam-policy $PROJECT_ID \
 
 ---
 
-*Last updated: December 20, 2025*
+*Last updated: December 28, 2025*

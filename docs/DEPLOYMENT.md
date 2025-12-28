@@ -11,7 +11,11 @@ This guide covers deploying CartIQ Backend to GCP Cloud Run, including admin use
 3. [Admin User Setup](#admin-user-setup)
 4. [Local Development](#local-development)
 5. [GCP Cloud Run Deployment](#gcp-cloud-run-deployment)
-6. [Troubleshooting](#troubleshooting)
+6. [GitHub Actions Deployment (Recommended)](#github-actions-deployment-recommended)
+7. [Post-Deployment](#post-deployment)
+8. [Troubleshooting](#troubleshooting)
+9. [Security Checklist](#security-checklist)
+10. [Quick Reference](#quick-reference)
 
 ---
 
@@ -266,90 +270,126 @@ curl -X POST $SERVICE_URL/api/auth/login \
 
 For automated CI/CD deployments, use the GitHub Actions workflow at `.github/workflows/deploy.yml`.
 
-### Step 1: Create GCP Service Account
+### Step 1: Set Up Workload Identity Federation (WIF)
+
+The workflows use Workload Identity Federation for keyless authentication (more secure than service account keys).
 
 ```bash
-# Create service account
+PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects describe ${PROJECT_ID} --format='value(projectNumber)')
+
+# Create a Workload Identity Pool
+gcloud iam workload-identity-pools create "github-pool" \
+    --location="global" \
+    --display-name="GitHub Actions Pool"
+
+# Create a Workload Identity Provider
+gcloud iam workload-identity-pools providers create-oidc "github-provider" \
+    --location="global" \
+    --workload-identity-pool="github-pool" \
+    --display-name="GitHub Provider" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository" \
+    --issuer-uri="https://token.actions.githubusercontent.com"
+
+# Create service account for GitHub Actions
 gcloud iam service-accounts create github-actions \
     --display-name="GitHub Actions"
 
-# Grant required roles
-PROJECT_ID=$(gcloud config get-value project)
 SA_EMAIL="github-actions@${PROJECT_ID}.iam.gserviceaccount.com"
 
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/run.admin"
+# Grant required roles
+for ROLE in roles/run.admin roles/storage.admin roles/iam.serviceAccountUser \
+            roles/secretmanager.secretAccessor roles/cloudsql.client \
+            roles/artifactregistry.admin roles/aiplatform.user; do
+  gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+      --member="serviceAccount:${SA_EMAIL}" \
+      --role="${ROLE}"
+done
 
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/storage.admin"
+# Allow GitHub Actions to impersonate the service account
+gcloud iam service-accounts add-iam-policy-binding ${SA_EMAIL} \
+    --role="roles/iam.workloadIdentityUser" \
+    --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/attribute.repository/YOUR_GITHUB_ORG/YOUR_REPO"
 
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/iam.serviceAccountUser"
-
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/secretmanager.secretAccessor"
-
-gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/cloudsql.client"
-
-# Create and download key
-gcloud iam service-accounts keys create github-actions-key.json \
-    --iam-account=${SA_EMAIL}
+# Get the WIF provider resource name (you'll need this for GitHub secrets)
+echo "WIF_PROVIDER: projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
+echo "WIF_SERVICE_ACCOUNT: ${SA_EMAIL}"
 ```
 
 ### Step 2: Configure GitHub Secrets
 
-Go to your GitHub repository → Settings → Secrets and variables → Actions
+Go to your GitHub repository → Settings → Secrets and variables → Actions → Secrets tab
 
-**Required Secrets:**
+#### Required Secrets (for both pipelines)
 
-| Secret Name | Value |
-|------------|-------|
-| `GCP_PROJECT_ID` | Your GCP project ID (e.g., `cartiq-480815`) |
-| `GCP_SA_KEY` | Contents of `github-actions-key.json` (base64 encoded JSON) |
-| `CONFLUENT_BOOTSTRAP_SERVERS` | Kafka bootstrap servers |
+| Secret Name | Description | Example |
+|-------------|-------------|---------|
+| `GCP_PROJECT_ID` | Your GCP project ID | `cartiq-480815` |
+| `WIF_PROVIDER` | Workload Identity Federation provider | `projects/123.../providers/github-provider` |
+| `WIF_SERVICE_ACCOUNT` | Service account email | `github-actions@project.iam.gserviceaccount.com` |
+
+#### Deploy Pipeline Secrets
+
+| Secret Name | Description |
+|-------------|-------------|
+| `CONFLUENT_BOOTSTRAP_SERVERS` | Kafka bootstrap servers (e.g., `pkc-xxx.us-central1.gcp.confluent.cloud:9092`) |
+| `CONFLUENT_SCHEMA_REGISTRY_URL` | Schema Registry URL (e.g., `https://psrc-xxx.us-central1.gcp.confluent.cloud`) |
+| `VECTOR_SEARCH_INDEX_ENDPOINT` | Vector Search index endpoint resource name |
+| `VECTOR_SEARCH_DEPLOYED_INDEX_ID` | Deployed index ID (e.g., `cartiq_products_deployed`) |
+| `VECTOR_SEARCH_API_ENDPOINT` | Vector Search API endpoint (e.g., `xxx.us-central1-xxx.vdb.vertexai.goog`) |
+| `VECTOR_SEARCH_INDEX_ID` | Vector Search index ID |
+| `REDIS_HOST` | Redis/Memorystore instance IP |
+
+#### Batch Indexing Pipeline Secrets
+
+| Secret Name | Description |
+|-------------|-------------|
+| `INTERNAL_API_KEY` | API key for internal batch indexing endpoints |
 
 ### Step 3: Configure GitHub Variables
 
-Go to your GitHub repository → Settings → Secrets and variables → Actions → Variables
+Go to your GitHub repository → Settings → Secrets and variables → Actions → Variables tab
 
-**Required Variables:**
+| Variable Name | Description | Default |
+|---------------|-------------|---------|
+| `GCP_REGION` | GCP region | `us-central1` |
+| `CLOUD_SQL_INSTANCE_NAME` | Cloud SQL instance name | `cartiq-db` |
+| `DB_NAME` | Database name | `cartiq` |
+| `DB_USER` | Database username | `cartiq-user` |
+| `ADMIN_EMAIL` | Admin user email | `admin@cartiq.com` |
+| `CORS_ALLOWED_ORIGINS` | Allowed CORS origins | `https://your-frontend.web.app` |
+| `REDIS_PORT` | Redis port | `6379` |
 
-| Variable Name | Value |
-|--------------|-------|
-| `GCP_REGION` | `us-central1` |
-| `CLOUD_SQL_INSTANCE_NAME` | `cartiq-db` |
-| `DB_NAME` | `cartiq` |
-| `DB_USER` | `cartiq-user` |
-| `CORS_ALLOWED_ORIGINS` | `https://your-frontend.web.app` |
-| `ADMIN_EMAIL` | `admin@cartiq.com` |
+### Step 4: Create GCP Secret Manager Secrets
 
-**Optional Variables (for RAG):**
-
-| Variable Name | Value |
-|--------------|-------|
-| `VECTOR_SEARCH_INDEX_ENDPOINT` | Your Vector Search endpoint |
-| `VECTOR_SEARCH_DEPLOYED_INDEX_ID` | Your deployed index ID |
-| `REDIS_HOST` | Redis instance IP |
-| `REDIS_PORT` | `6379` |
-
-### Step 4: Create GCP Secrets
-
-Ensure these secrets exist in GCP Secret Manager (see Step 1 in manual deployment):
+These secrets are mounted directly into Cloud Run at runtime:
 
 ```bash
-# Required secrets
-gcloud secrets create jwt-secret --data-file=-
-gcloud secrets create db-password --data-file=-
-gcloud secrets create confluent-api-key --data-file=-
-gcloud secrets create confluent-api-secret --data-file=-
-gcloud secrets create admin-password --data-file=-
+# Core secrets
+echo -n "your-256-bit-jwt-secret" | gcloud secrets create jwt-secret --data-file=-
+echo -n "your-db-password" | gcloud secrets create db-password --data-file=-
+echo -n "YourAdminPassword123!" | gcloud secrets create admin-password --data-file=-
+echo -n "your-internal-api-key" | gcloud secrets create internal-api-key --data-file=-
+
+# Confluent Cloud secrets
+echo -n "your-confluent-api-key" | gcloud secrets create confluent-api-key --data-file=-
+echo -n "your-confluent-api-secret" | gcloud secrets create confluent-api-secret --data-file=-
+echo -n "your-schema-registry-api-key" | gcloud secrets create confluent-sr-api-key --data-file=-
+echo -n "your-schema-registry-api-secret" | gcloud secrets create confluent-sr-api-secret --data-file=-
 ```
+
+**Summary of GCP Secret Manager secrets:**
+
+| Secret Name | Used By | Description |
+|-------------|---------|-------------|
+| `jwt-secret` | Deploy | JWT signing key |
+| `db-password` | Deploy | PostgreSQL password |
+| `admin-password` | Deploy | Initial admin user password |
+| `internal-api-key` | Deploy, Batch Indexing | API key for internal endpoints |
+| `confluent-api-key` | Deploy | Confluent Cloud API key |
+| `confluent-api-secret` | Deploy | Confluent Cloud API secret |
+| `confluent-sr-api-key` | Deploy | Schema Registry API key |
+| `confluent-sr-api-secret` | Deploy | Schema Registry API secret |
 
 ### Step 5: Trigger Deployment
 
@@ -358,6 +398,32 @@ Deployments are triggered automatically on push to `main` branch, or manually vi
 1. Go to Actions tab in GitHub
 2. Select "Deploy to Cloud Run" workflow
 3. Click "Run workflow"
+
+### Step 6: Batch Indexing Pipeline (Vector Search)
+
+The batch indexing pipeline (`.github/workflows/index-products.yml`) updates the Vector Search index with product embeddings.
+
+**Triggers:**
+- **Scheduled**: Runs weekly on Sunday at 2 AM UTC
+- **Manual**: Can be triggered via GitHub Actions UI
+
+**To run manually:**
+1. Go to Actions tab in GitHub
+2. Select "Batch Index Products to Vector Search" workflow
+3. Click "Run workflow"
+4. Choose `complete_overwrite`: `true` for full reindex, `false` for delta update
+
+**Pipeline steps:**
+1. Export products to GCS
+2. Submit batch embedding job (Vertex AI)
+3. Wait for embeddings to complete
+4. Transform to Vector Search format
+5. Update Vector Search index
+
+**Required for this pipeline:**
+- All secrets from Step 2 (GCP authentication)
+- `INTERNAL_API_KEY` secret (for calling internal APIs)
+- GCS bucket `cartiq-indexing-data` must exist
 
 ---
 

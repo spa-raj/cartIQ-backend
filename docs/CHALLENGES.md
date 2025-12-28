@@ -4,6 +4,19 @@ This document captures key technical challenges encountered during development a
 
 ---
 
+## Table of Contents
+
+1. [Suggestions API Showing Wrong Products](#1-suggestions-api-showing-wrong-products)
+2. ["Trending Now" Showing Duplicate/Homogeneous Products](#2-trending-now-showing-duplicatehomogeneous-products)
+3. [Category API Returning productCount: 0](#3-category-api-returning-productcount-0)
+4. [Parent Categories Returning 0 Products](#4-parent-categories-returning-0-products)
+5. [Similar Products Showing Unrelated Items](#5-similar-products-showing-unrelated-items)
+6. [AI Chat Returning Wrong Products for Category Queries](#6-ai-chat-returning-wrong-products-for-category-queries)
+7. [Hybrid Search Returning 0 Results for Brand + Category + Price Queries](#7-hybrid-search-returning-0-results-for-brand--category--price-queries)
+8. [Key Learnings](#key-learnings)
+
+---
+
 ## 1. Suggestions API Showing Wrong Products
 
 **Date:** December 2024
@@ -347,6 +360,135 @@ After applying all fixes:
 
 ---
 
+## 7. Hybrid Search Returning 0 Results for Brand + Category + Price Queries
+
+**Date:** December 2024
+
+### Problem
+AI chatbot returned 0 results when users asked for brand + category + price combinations:
+- Query: "Recommend me Samsung mobile phones under 30000"
+- Expected: Budget Samsung phones
+- Actual: 0 results (or expensive products >₹45,000)
+
+### Root Cause Analysis
+
+**Issue 1: Same Query Sent to Both Vector Search and FTS**
+
+The hybrid search passed the identical query to both search engines:
+```java
+// Both received: "Samsung mobile phones under 30000"
+vectorResults = executeVectorSearch(query, ...);
+ftsResults = executeFtsSearch(query, ...);
+```
+
+**Issue 2: PostgreSQL FTS Uses AND Logic**
+
+FTS requires ALL terms to match. The query "Samsung mobile phones" failed because:
+- `FTS("Samsung")` → 18 results ✓
+- `FTS("Samsung mobile phones")` → 0 results ✗ (products don't contain "mobile")
+
+PostgreSQL FTS tokenizes and requires all tokens to be present in the search vector.
+
+**Issue 3: Brand Search Ignored Price Filters**
+
+`getProductsByBrand("Samsung")` returned top 30 Samsung products by default ordering:
+- 27 Samsung TVs (₹30,000 - ₹200,000)
+- 2 Samsung phones (both >₹45,000)
+- 1 Samsung tablet
+
+No budget phones appeared because price filters weren't applied to brand search.
+
+### Solution
+
+**1. Split Query Strategy** (`ProductToolService.java`)
+
+Use different queries for different search engines based on their strengths:
+
+```java
+// Vector search: full natural language (semantic understanding)
+String vectorQuery = (query != null && !query.isBlank()) ? query : brand;
+
+// FTS search: brand keyword only (exact matching, won't break)
+String ftsQuery = (brand != null && !brand.isBlank()) ? brand : query;
+
+log.info("Search queries: vectorQuery='{}', ftsQuery='{}'", vectorQuery, ftsQuery);
+
+// 1. Vector Search - understands "mobile phones" semantically
+vectorResults = executeVectorSearch(vectorQuery, ...);
+
+// 2. FTS Search - robust exact match on "Samsung"
+ftsResults = executeFtsSearchWithLimit(ftsQuery, ...);
+```
+
+**2. Brand Search with Price Filters** (`ProductRepository.java`)
+
+Added new query that filters by price and orders by price ASC:
+
+```java
+@Query("SELECT p FROM Product p WHERE p.status = 'ACTIVE' " +
+       "AND LOWER(p.brand) = LOWER(:brand) " +
+       "AND (:minPrice IS NULL OR p.price >= :minPrice) " +
+       "AND (:maxPrice IS NULL OR p.price <= :maxPrice) " +
+       "AND (:minRating IS NULL OR p.rating >= :minRating) " +
+       "ORDER BY p.price ASC")
+Page<Product> findByBrandWithFilters(@Param("brand") String brand,
+                                     @Param("minPrice") BigDecimal minPrice,
+                                     @Param("maxPrice") BigDecimal maxPrice,
+                                     @Param("minRating") BigDecimal minRating,
+                                     Pageable pageable);
+```
+
+**3. Updated Hybrid Search Flow**
+
+```
+User: "Samsung mobile phones under 30000"
+         ↓
+    ┌────┴────┐
+    │ Gemini  │ → Extracts: query="Samsung mobile phones", brand="Samsung", maxPrice=30000
+    └────┬────┘
+         ↓
+   ┌─────┴─────┐
+   │  Hybrid   │
+   │  Search   │
+   └─────┬─────┘
+         ↓
+┌────────┼────────┬────────────┐
+↓        ↓        ↓            ↓
+Vector   FTS    Category    Brand+Price
+"Samsung "Samsung" Smartphones Samsung
+mobile               filter   <30000
+phones"                       ASC
+    ↓        ↓        ↓            ↓
+Semantic  Exact   Category    Budget
+matches   brand   products    Samsung
+          match              phones first
+    └────────┴────────┴────────────┘
+                  ↓
+           Merge + Dedupe
+           (Brand results first)
+                  ↓
+           Rerank top 10
+                  ↓
+           Return results
+```
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `ProductToolService.java:101-108` | Split `vectorQuery` vs `ftsQuery` |
+| `ProductToolService.java:137-147` | Use `getProductsByBrandWithFilters` |
+| `ProductRepository.java:46-56` | Added `findByBrandWithFilters()` |
+| `ProductService.java:87-106` | Added `getProductsByBrandWithFilters()` |
+
+### Result
+- Query "Samsung mobile phones under 30000" now returns Samsung phones under ₹30,000
+- Vector search handles semantic understanding ("mobile phones" → Smartphones)
+- FTS provides robust brand matching without breaking on natural language
+- Brand search surfaces budget products first (ordered by price ASC)
+
+---
+
 ## Key Learnings
 
 1. **Don't trust inferred data over raw data** - Using actual search queries is more reliable than categories inferred from search results
@@ -366,3 +508,5 @@ After applying all fixes:
 8. **Boost, don't filter** - When search relevance is uncertain, boost preferred results to the top rather than filtering out potentially relevant items
 
 9. **Give AI the vocabulary** - Provide LLMs with exact category names to prevent mismatches between user language and database values
+
+10. **Different search engines need different queries** - Vector search handles natural language semantically; FTS needs exact keywords. Passing the same query to both causes failures when queries contain words not in the index

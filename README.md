@@ -1,25 +1,267 @@
-# CartIQ Backend
+# 🛒 CartIQ Backend
 
-AI-powered e-commerce backend built for the **AI Partner Catalyst Hackathon** (Confluent Challenge).
+> **AI-Powered Shopping Assistant with Real-Time Personalization**
 
-## Tech Stack
+[![AI Partner Catalyst Hackathon](https://img.shields.io/badge/Hackathon-AI%20Partner%20Catalyst-blue)](https://ai-partner-catalyst.devpost.com/)
+[![Confluent Challenge](https://img.shields.io/badge/Challenge-Confluent-orange)](https://confluent.io)
+[![Java 17](https://img.shields.io/badge/Java-17-red)](https://openjdk.org)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green)](https://spring.io)
 
-- Java 17 / Spring Boot 4.0
-- PostgreSQL (Cloud SQL)
-- Apache Kafka (Confluent Cloud)
-- Google Cloud Vertex AI (Gemini)
-- Redis (Cloud Memorystore)
+**CartIQ** transforms e-commerce recommendations by replacing stale batch data with **real-time streaming AI**. Every click, browse, and cart action flows through Confluent Kafka and Flink, enabling **personalized suggestions in ~300ms** and intelligent AI chat responses in **2-4 seconds**.
 
-## Quick Start
+---
+
+## 📑 Table of Contents
+
+- [The Problem](#-the-problem)
+- [Our Solution](#-our-solution)
+- [Architecture](#-architecture)
+- [Key Features](#-key-features)
+- [Performance](#-performance)
+- [Tech Stack](#-tech-stack)
+- [Project Structure](#-project-structure)
+- [Demo Flow](#-demo-flow)
+- [AI Chat Query Examples](#-ai-chat-query-examples)
+- [Kafka Topics](#-kafka-topics)
+- [Quick Start](#-quick-start)
+- [Configuration](#-configuration)
+- [Hackathon Alignment](#-hackathon-alignment)
+- [Documentation](#-documentation)
+- [Related Repositories](#-related-repositories)
+- [License](#-license)
+
+---
+
+## 🎯 The Problem
+
+Traditional e-commerce platforms use **batch-processed data** for recommendations:
+- Data is hours or days old
+- Recommendations miss the moment
+- Cold start users get generic suggestions
+
+## 💡 Our Solution
+
+CartIQ uses **real-time event streaming + RAG architecture**:
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Event Streaming** | Confluent Kafka | Captures every user action in real-time |
+| **Stream Processing** | Apache Flink (Confluent Cloud) | Continuous aggregation of user behavior |
+| **User Context** | Redis | Sub-millisecond profile lookup |
+| **4-Way Hybrid Search** | Vertex AI Vector Search + PostgreSQL FTS | Semantic + keyword + category + brand search |
+| **Re-ranking** | Vertex AI Ranking API | Cross-encoder precision scoring |
+| **Response Generation** | Gemini 2.0 Flash | Personalized, conversational recommendations |
+
+**Result:** Suggestions in **~300ms**, AI Chat in **2-4s**.
+
+---
+
+## 🏗️ Architecture
+
+![CartIQ System Architecture](./docs/images/cartIQ-architecture.png)
+
+
+### Kafka Topics
+
+![Kafka Topics](./docs/images/confluent-cloud/kafka-topics.png)
+
+### Flink SQL Jobs
+
+![Flink SQL Jobs](./docs/images/confluent-cloud/flink-jobs.png)
+
+### Stream Lineage
+
+![Stream Lineage](./docs/images/confluent-cloud/stream-lineage.png)
+
+---
+
+## 🚀 Key Features
+
+### 1. Real-Time Context Building
+Every user action streams to Kafka and gets aggregated by Flink:
+- **Product Views** → Category preferences, price range
+- **Cart Events** → Purchase intent signals
+- **AI Chat Queries** → Explicit intent (strongest signal!)
+- **Session Activity** → Device type, engagement duration
+
+### 2. 4-Way Hybrid Search + RAG
+High recall + high precision for optimal results:
+```
+Query → 4-Way Search (Vector + FTS + Category + Brand) → Filter → Re-Ranker (Top-10) → Gemini
+```
+
+### 3. New User Experience
+New users see **curated sections** (Trending, Best of Electronics, Best of Fashion). Personalized "Suggested For You" appears after first interaction.
+
+### 4. Dual Recommendation Surfaces
+- **Home Page (Suggestions API)**: Uses Flink-enriched profiles from Redis for personalized recommendations
+- **AI Chat**: Uses Gemini with function calling → 4-Way Hybrid Search → Re-Ranker for conversational recommendations
+
+**Connection:** AI Chat publishes events to Kafka → Flink aggregates them → Redis caches the profile → Suggestions API uses it. Your chat queries influence your future homepage suggestions.
+
+---
+
+## ⚡ Performance
+
+### Suggestions API (`/api/suggestions`)
+| Stage | Latency |
+|-------|---------|
+| User Context (Redis) | <1ms |
+| Vector Search + Category Query | ~150ms |
+| Product Enrichment | ~150ms |
+| **Total End-to-End** | **~300ms** |
+
+### AI Chat API (`/api/chat`)
+| Stage | Latency |
+|-------|---------|
+| 4-Way Hybrid Search | ~50ms |
+| Filter + Re-Ranking | ~100ms |
+| Gemini Response (LLM) | 2-4s |
+| **Total End-to-End** | **2-4s** |
+
+- **Context Update Frequency**: Continuous (Flink upsert mode)
+- **New Users**: Curated sections (Trending, Best of Electronics, Best of Fashion)
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Backend** | Java 17, Spring Boot 4.0 (Modular Monolith) |
+| **Database** | PostgreSQL (Cloud SQL) |
+| **Cache** | Redis (Cloud Memorystore) |
+| **Object Storage** | Google Cloud Storage (batch indexing pipeline) |
+| **Streaming** | Apache Kafka (Confluent Cloud) |
+| **Processing** | Apache Flink (Confluent Cloud) |
+| **Vector DB** | Vertex AI Vector Search |
+| **Embeddings** | Vertex AI text-embedding-004 (768-dim) |
+| **Re-ranking** | Vertex AI Ranking API |
+| **LLM** | Gemini 2.0 Flash |
+| **Hosting** | Google Cloud Run (Backend + Frontend) |
+| **Frontend** | Next.js 14, TypeScript, Tailwind CSS, Lucide React (separate repo) |
+
+---
+
+## 📦 Project Structure
+
+```
+cartiq-backend/
+├── cartiq-common/     # Shared DTOs, exceptions, utilities
+├── cartiq-user/       # Authentication, profiles, JWT
+├── cartiq-product/    # Product catalog, categories, search
+├── cartiq-order/      # Shopping cart, orders, checkout
+├── cartiq-kafka/      # Kafka producers/consumers, event DTOs
+├── cartiq-ai/         # RAG orchestrator, Gemini, chat API
+├── cartiq-rag/        # Vector search, embeddings, re-ranking
+├── cartiq-seeder/     # Database seeder utility
+└── cartiq-app/        # Main application assembly
+```
+
+---
+
+## 🎬 Demo Flow
+
+1. **New User**: User visits home page → sees Trending, Best of Electronics, Best of Fashion sections
+2. **Generate Events**: Browse electronics, view phones, add to cart
+3. **Context Updates**: Flink continuously aggregates behavior → Redis caches updated profile
+4. **Return to Home**: Personalized "Suggested For You" section now appears with electronics!
+5. **AI Chat**: "Recommend Samsung phones under 30000" → Gemini uses 4-Way Hybrid Search + Re-Ranker
+
+**The feedback loop**: AI Chat events → Kafka → Flink → Redis → Suggestions API. Your chat queries shape your future homepage recommendations.
+
+---
+
+## 💬 AI Chat Query Examples
+
+Test the AI chat with these sample queries to explore different search capabilities:
+
+### Brand + Category + Price (Hybrid Search)
+```
+Recommend me Samsung mobile phones under 30000
+Show me Apple laptops under 100000
+Find Sony headphones between 5000 and 15000
+I want Puma running shoes under 5000
+```
+
+### Category-Based Queries
+```
+Show me the best smartphones available
+I'm looking for wireless earbuds
+What laptops do you have for gaming?
+Show me some good skincare products
+Show me women's kurta
+```
+
+### Price Range Queries
+```
+Recommend me budget headphones under 2000
+Recommend me women's running shoes under 4000
+```
+
+### Rating & Quality Queries
+```
+Show me top-rated products in electronics
+What are the best reviewed headphones?
+Find highly rated phones with good cameras
+Recommend products with ratings above 4.5
+```
+
+### Comparison & Recommendations
+```
+Compare Samsung and Apple phones under 80000
+What's better for gaming - laptop or tablet?
+```
+
+### Use-Case Based Queries
+```
+I need a phone for photography
+Suggest a laptop for programming
+What headphones are good for workouts?
+```
+
+---
+
+## 📡 Kafka Topics
+
+### Input Topics (5 Event Streams)
+| Topic | Description | Signal Strength |
+|-------|-------------|-----------------|
+| `user-events` | Session events, page visits, navigation | Low |
+| `product-views` | Product page views, search clicks | Medium |
+| `cart-events` | Add/remove cart, quantity changes | High |
+| `order-events` | Order placed, completed, cancelled | High |
+| `ai-events` | AI chat queries (explicit intent signals) | **Strongest** |
+
+### Output Topics (Flink Aggregated)
+| Topic | Description |
+|-------|-------------|
+| `user-profiles` | Aggregated user context (consumed by backend) |
+
+**Total: 6 topics (5 input + 1 output)**
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Java 17+
+- Maven 3.8+
+- Docker (for local Kafka/Redis)
 
 ### Local Development
 
 ```bash
+# Clone the repository
+git clone https://github.com/your-org/cartiq-backend.git
+cd cartiq-backend
+
 # Copy environment file
 cp .env.example .env
-
 # Edit .env with your values
-nano .env
+
+# Start dependencies (Kafka, Redis, PostgreSQL)
+docker-compose up -d
 
 # Run the application
 mvn spring-boot:run -pl cartiq-app
@@ -33,223 +275,68 @@ mvn clean package -pl cartiq-app -am -DskipTests
 
 ---
 
-## Deployment Configuration
+## 🔧 Configuration
 
-### GitHub Secrets
+### Required Environment Variables
 
-Go to: **Settings → Secrets and variables → Actions → Secrets**
+| Variable | Description |
+|----------|-------------|
+| `CONFLUENT_BOOTSTRAP_SERVERS` | Kafka bootstrap servers |
+| `CONFLUENT_API_KEY` | Confluent Cloud API key |
+| `CONFLUENT_API_SECRET` | Confluent Cloud API secret |
+| `GCP_PROJECT_ID` | Google Cloud project ID |
+| `REDIS_HOST` | Redis host for user profile cache |
 
-| Secret Name | Required | Description | Example |
-|-------------|----------|-------------|---------|
-| `GCP_PROJECT_ID` | Yes | GCP project ID | `my-project-123456` |
-| `WIF_PROVIDER` | Yes | Workload Identity Federation provider | `projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
-| `WIF_SERVICE_ACCOUNT` | Yes | Service account email | `github-actions@my-project-123456.iam.gserviceaccount.com` |
-| `CONFLUENT_BOOTSTRAP_SERVERS` | Yes | Kafka bootstrap servers | `pkc-xxxxx.region.provider.confluent.cloud:9092` |
-| `CONFLUENT_SCHEMA_REGISTRY_URL` | Yes | Schema Registry URL | `https://psrc-xxxxx.region.provider.confluent.cloud` |
-| `VECTOR_SEARCH_INDEX_ENDPOINT` | No | Vector Search endpoint (for RAG) | `projects/123456789/locations/us-central1/indexEndpoints/987654321` |
-| `REDIS_HOST` | No | Redis internal IP (for RAG) | `10.0.0.1` |
-
-### GitHub Variables
-
-Go to: **Settings → Secrets and variables → Actions → Variables**
-
-| Variable Name | Required | Default | Description | Example |
-|---------------|----------|---------|-------------|---------|
-| `GCP_REGION` | No | `us-central1` | GCP region | `us-central1` |
-| `CLOUD_SQL_INSTANCE_NAME` | No | `cartiq-db` | Cloud SQL instance name (not connection name) | `my-database-instance` |
-| `DB_NAME` | No | `cartiq` | Database name inside the instance | `myapp` |
-| `DB_USER` | No | `cartiq-user` | Database username | `db-user` |
-| `VECTOR_SEARCH_DEPLOYED_INDEX_ID` | No | - | Deployed index ID | `1234567890123456789` |
-| `VECTOR_SEARCH_API_ENDPOINT` | No | - | Vector Search API endpoint | `us-central1-aiplatform.googleapis.com` |
-| `REDIS_PORT` | No | - | Redis port | `6379` |
-| `RAG_ENABLED` | No | - | Enable RAG features | `true` |
-| `ADMIN_EMAIL` | No | - | Initial admin email | `admin@example.com` |
-| `CORS_ALLOWED_ORIGINS` | Yes | - | Frontend URLs (comma-separated) | `https://my-frontend.web.app` |
-
-### GCP Secret Manager
-
-Create these secrets in GCP (referenced by Cloud Run at runtime):
-
-```bash
-# JWT signing key (min 256 bits)
-echo -n "your-secure-jwt-secret-at-least-256-bits-long" | \
-  gcloud secrets create jwt-secret --data-file=-
-
-# Database password
-echo -n "your-db-password" | \
-  gcloud secrets create db-password --data-file=-
-
-# Confluent Cloud API key (Kafka)
-echo -n "your-confluent-api-key" | \
-  gcloud secrets create confluent-api-key --data-file=-
-
-# Confluent Cloud API secret (Kafka)
-echo -n "your-confluent-api-secret" | \
-  gcloud secrets create confluent-api-secret --data-file=-
-
-# Schema Registry API key
-echo -n "your-schema-registry-api-key" | \
-  gcloud secrets create confluent-sr-api-key --data-file=-
-
-# Schema Registry API secret
-echo -n "your-schema-registry-api-secret" | \
-  gcloud secrets create confluent-sr-api-secret --data-file=-
-
-# Admin password (min 8 chars, uppercase, lowercase, digit, special char)
-echo -n "AdminPass123!" | \
-  gcloud secrets create admin-password --data-file=-
-```
-
-| GCP Secret Name | Description |
-|-----------------|-------------|
-| `jwt-secret` | JWT signing key |
-| `db-password` | PostgreSQL password |
-| `confluent-api-key` | Confluent Cloud Kafka API key |
-| `confluent-api-secret` | Confluent Cloud Kafka API secret |
-| `confluent-sr-api-key` | Schema Registry API key |
-| `confluent-sr-api-secret` | Schema Registry API secret |
-| `admin-password` | Initial admin user password |
+See [Deployment Guide](./docs/DEPLOYMENT.md) for complete setup instructions.
 
 ---
 
-## Workload Identity Federation Setup
+## 📊 Hackathon Alignment
 
-```bash
-# Set variables - replace with your values
-export PROJECT_ID="your-gcp-project-id"
-export GITHUB_ORG="your-github-username"
-export REPO_NAME="your-repo-name"
-
-# Enable APIs
-gcloud services enable iamcredentials.googleapis.com sts.googleapis.com
-
-# Create Workload Identity Pool
-gcloud iam workload-identity-pools create "github-pool" \
-    --project="$PROJECT_ID" \
-    --location="global" \
-    --display-name="GitHub Actions Pool"
-
-# Create Provider
-gcloud iam workload-identity-pools providers create-oidc "github-provider" \
-    --project="$PROJECT_ID" \
-    --location="global" \
-    --workload-identity-pool="github-pool" \
-    --display-name="GitHub Provider" \
-    --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner" \
-    --attribute-condition="assertion.repository_owner == '${GITHUB_ORG}'" \
-    --issuer-uri="https://token.actions.githubusercontent.com"
-
-# Create Service Account
-gcloud iam service-accounts create "github-actions" \
-    --project="$PROJECT_ID" \
-    --display-name="GitHub Actions Service Account"
-
-# Grant roles
-SA_EMAIL="github-actions@${PROJECT_ID}.iam.gserviceaccount.com"
-for ROLE in "roles/run.admin" "roles/storage.admin" "roles/iam.serviceAccountUser" "roles/secretmanager.secretAccessor" "roles/cloudsql.client"; do
-    gcloud projects add-iam-policy-binding $PROJECT_ID \
-        --member="serviceAccount:${SA_EMAIL}" \
-        --role="$ROLE"
-done
-
-# Allow GitHub to impersonate service account
-PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
-gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
-    --project="$PROJECT_ID" \
-    --role="roles/iam.workloadIdentityUser" \
-    --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/attribute.repository/${GITHUB_ORG}/${REPO_NAME}"
-
-# Get values for GitHub secrets
-echo "WIF_PROVIDER: projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
-echo "WIF_SERVICE_ACCOUNT: ${SA_EMAIL}"
-```
+| Requirement | Implementation | Status |
+|-------------|----------------|--------|
+| Confluent Kafka | 6 topics (5 input + 1 output) | ✅ |
+| Confluent Flink | Continuous aggregation (upsert mode) | ✅ |
+| Google Vertex AI | Embeddings, Vector Search, Ranking, Gemini | ✅ |
+| Google Cloud Run | Production deployment | ✅ |
+| Real-time AI | Suggestions: Flink-enriched profiles; AI Chat: 4-Way Hybrid RAG | ✅ |
+| Response Time | ~300ms Suggestions, 2-4s AI Chat | ✅ |
+| New User Experience | Curated sections (Trending, Best of Electronics/Fashion) | ✅ |
 
 ---
 
-## Project Structure
+## 📚 Documentation
 
-```
-cartiq-backend/
-├── cartiq-common/     # Shared DTOs, exceptions, utilities
-├── cartiq-user/       # User auth, profiles, JWT
-├── cartiq-product/    # Product catalog, categories
-├── cartiq-order/      # Shopping cart, orders
-├── cartiq-kafka/      # Kafka producers/consumers
-├── cartiq-ai/         # Gemini integration, chat API
-├── cartiq-rag/        # RAG pipeline (future)
-├── cartiq-seeder/     # Database seeder utility
-└── cartiq-app/        # Main application assembly
-```
-
----
-
-## API Endpoints
-
-| Module | Endpoints |
-|--------|-----------|
-| User | `/api/auth/**`, `/api/users/**` |
-| Product | `/api/products/**`, `/api/categories/**` |
-| Order | `/api/cart/**`, `/api/orders/**` |
-| Kafka | `/api/events/**` |
-| AI | `/api/chat/**` |
-
----
-
-## Documentation
-
-- [Architecture](./docs/ARCHITECTURE.md)
+- [Architecture Deep Dive](./docs/ARCHITECTURE.md)
+- [Challenges & Solutions](./docs/CHALLENGES.md)
 - [Deployment Guide](./docs/DEPLOYMENT.md)
 - [GCP Setup](./docs/GCP_SETUP.md)
-- [User API Testing](./docs/API-testing/USER_API_TESTING.md)
-- [Product API Testing](./docs/API-testing/PRODUCT_API_TESTING.md)
-- [Order API Testing](./docs/API-testing/ORDER_API_TESTING.md)
-- [Chat API Testing](./docs/API-testing/CHAT_API_TESTING.md)
+- [Batch Indexing Pipeline](./docs/BATCH_INDEXING.md)
+- [RAG vs Tool Use](./docs/RAGvsToolUse.md)
+- [Flink SQL Queries](./docs/flink-sql/README.md)
+
+### API Testing Guides
+- [User API](./docs/API-testing/USER_API_TESTING.md)
+- [Product API](./docs/API-testing/PRODUCT_API_TESTING.md)
+- [Order API](./docs/API-testing/ORDER_API_TESTING.md)
+- [Chat API](./docs/API-testing/CHAT_API_TESTING.md)
+- [Suggestions API](./docs/API-testing/SUGGESTIONS_API_TESTING.md)
 
 ---
 
-## Troubleshooting Deployment
+## 🤝 Related Repositories
 
-### Container fails to start
-
-If you see `The user-provided container failed to start and listen on the port`:
-
-1. **Check GCP Secrets exist:**
-   ```bash
-   gcloud secrets list --project=YOUR_PROJECT_ID
-   ```
-   Required secrets: `jwt-secret`, `db-password`, `confluent-api-key`, `confluent-api-secret`, `admin-password`
-
-2. **Grant Secret Manager access to Cloud Run:**
-   ```bash
-   PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format='value(projectNumber)')
-   gcloud secrets add-iam-policy-binding jwt-secret \
-     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-     --role="roles/secretmanager.secretAccessor"
-   # Repeat for other secrets...
-   ```
-
-3. **Verify Cloud SQL instance exists:**
-   ```bash
-   gcloud sql instances list --project=YOUR_PROJECT_ID
-   ```
-
-4. **Check Cloud Run logs:**
-   ```bash
-   gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=cartiq-backend" \
-     --limit=50 --project=YOUR_PROJECT_ID
-   ```
-
-### Permission denied on logs
-
-Grant yourself logging access:
-```bash
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-  --member="user:your-email@example.com" \
-  --role="roles/logging.viewer"
-```
+- **Frontend**: [cartiq-frontend](https://github.com/spa-raj/cartIQ-frontend) - Next.js 14, TypeScript, Tailwind CSS, Lucide React
 
 ---
 
-## License
+## 📄 License
 
 MIT
+
+---
+
+<p align="center">
+  <b>Built for the AI Partner Catalyst Hackathon (Confluent Challenge)</b><br>
+  <i>Real-time AI that traditional batch systems simply can't match.</i>
+</p>

@@ -2,6 +2,21 @@
 
 This document describes the batch indexing pipeline for indexing products into Vertex AI Vector Search. This approach handles large datasets (35,000+ products) without rate limiting issues.
 
+---
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Running the Pipeline](#running-the-pipeline)
+3. [Pipeline Steps](#pipeline-steps)
+4. [GCS Bucket Structure](#gcs-bucket-structure)
+5. [Configuration](#configuration)
+6. [Services](#services)
+7. [Troubleshooting](#troubleshooting)
+8. [References](#references)
+
+---
+
 ## Overview
 
 The batch indexing pipeline runs as a **GitHub Actions workflow** that orchestrates a 4-step process to embed and index all products into Vector Search.
@@ -139,10 +154,10 @@ cartiq:
   rag:
     enabled: true
     vectorsearch:
-      index-id: "3388617870991687680"
+      index-id: "3462517674652136480"
       index-endpoint: "projects/.../indexEndpoints/..."
       deployed-index-id: "cartiq_products_public"
-      api-endpoint: "1735428295.us-central1-886147182338.vdb.vertexai.goog:443"
+      api-endpoint: "1734685245.us-central1-99234182335.vdb.vertexai.goog:443"
     batch-indexing:
       gcs-bucket: "cartiq-indexing-data"
       input-prefix: "input"
@@ -178,37 +193,6 @@ Transforms embeddings to Vector Search datapoint format.
 Updates Vector Search index from GCS.
 - Uses **async LRO** to avoid Cloud Run timeout
 - Provides operation status polling
-
-## How RAG Works with Chat
-
-The chat API uses a **hybrid search** approach:
-
-```
-User Query
-    │
-    ▼
-┌─────────────────┐
-│ Gemini decides  │
-│ to call tool    │ ──► Tool Calling (Function Calling)
-└─────────────────┘
-    │
-    ▼
-┌─────────────────┐
-│ searchProducts  │
-│ tool executes   │
-└─────────────────┘
-    │
-    ├─► VectorSearchService.search()  ──► Semantic similarity (RAG)
-    │         │
-    │         ▼
-    │   ┌─────────────┐
-    │   │ Vertex AI   │
-    │   │ Vector      │
-    │   │ Search      │
-    │   └─────────────┘
-    │
-    └─► Fallback: PostgreSQL FTS  ──► Keyword search (if Vector Search fails)
-```
 
 ## Troubleshooting
 
